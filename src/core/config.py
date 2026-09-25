@@ -17,6 +17,9 @@ CORS_ORIGINS = [
 MAX_UPLOAD_SIZE_MB = int(os.getenv("MAX_UPLOAD_SIZE_MB", "50"))
 ALLOWED_UPLOAD_EXTENSIONS = {".pdf", ".docx", ".txt"}
 
+# Rate Limiting (requests per minute per user)
+RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "30"))
+
 # ──────────────────────────── LOGGING CONFIGURATION ────────────────────────────
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 LOG_FILE = os.getenv("LOG_FILE", os.path.join(BASE_DIR, "app.log"))
@@ -25,6 +28,7 @@ LOG_FILE = os.getenv("LOG_FILE", os.path.join(BASE_DIR, "app.log"))
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "")
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
+REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 ADMIN_DEFAULT_USERNAME = os.getenv("ADMIN_DEFAULT_USERNAME", "admin")
 ADMIN_DEFAULT_PASSWORD = os.getenv("ADMIN_DEFAULT_PASSWORD", "admin123")
 USERS_FILE_PATH = os.getenv("USERS_FILE_PATH", os.path.join(DOCS_PATH, "users.json"))
@@ -50,6 +54,10 @@ RERANKER_MODEL_NAME = LOCAL_RERANKER_PATH if os.path.exists(LOCAL_RERANKER_PATH)
 
 # Number of top candidate chunks to pass to LLM after Cross-Encoder reranking
 RERANKER_TOP_N = 3
+
+# ──────────────────────────── CHUNKING CONFIGURATION ────────────────────────────
+CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "600"))
+CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", "100"))
 
 os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"

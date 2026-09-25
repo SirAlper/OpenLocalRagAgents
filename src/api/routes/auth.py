@@ -2,9 +2,10 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from src.auth.dependencies import get_current_user, require_role
-from src.auth.jwt_handler import create_access_token
+from src.auth.jwt_handler import create_access_token, create_refresh_token, decode_refresh_token
 from src.auth.models import (
     LoginRequest,
+    RefreshRequest,
     TokenResponse,
     User,
     UserCreate,
@@ -22,7 +23,7 @@ router = APIRouter(prefix="/api/v1/auth", tags=["Authentication & Access Control
 @router.post("/login", response_model=TokenResponse)
 async def login(credentials: LoginRequest, http_req: Request):
     """
-    Authenticate with username and password to obtain a JWT Bearer token.
+    Authenticate with username and password to obtain JWT access and refresh tokens.
     """
     ip_addr = http_req.client.host if http_req.client else None
     user = user_store.authenticate_user(credentials.username, credentials.password)
@@ -42,6 +43,7 @@ async def login(credentials: LoginRequest, http_req: Request):
         )
 
     access_token, expires_in = create_access_token(user.username, user.role)
+    refresh_token, _ = create_refresh_token(user.username, user.role)
     audit_logger.log(
         username=user.username,
         role=user.role,
@@ -53,6 +55,51 @@ async def login(credentials: LoginRequest, http_req: Request):
     logger.info(f"User '{user.username}' logged in successfully (role: {user.role}).")
     return TokenResponse(
         access_token=access_token,
+        refresh_token=refresh_token,
+        token_type="bearer",
+        role=user.role,
+        username=user.username,
+        expires_in=expires_in,
+    )
+
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh_token(request: RefreshRequest, http_req: Request):
+    """
+    Exchange a valid refresh token for a new access token without re-authentication.
+    """
+    ip_addr = http_req.client.host if http_req.client else None
+    token_data = decode_refresh_token(request.refresh_token)
+    if token_data is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Verify user still exists and is active
+    user = user_store.get_user(token_data.username)
+    if user is None or user.disabled:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User account is no longer active.",
+        )
+
+    access_token, expires_in = create_access_token(user.username, user.role)
+    new_refresh_token, _ = create_refresh_token(user.username, user.role)
+
+    audit_logger.log(
+        username=user.username,
+        role=user.role,
+        action="token_refresh",
+        detail="Access token refreshed",
+        ip_address=ip_addr,
+        status="success",
+    )
+
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=new_refresh_token,
         token_type="bearer",
         role=user.role,
         username=user.username,
@@ -79,7 +126,7 @@ async def register_user(
     current_admin: User = Depends(require_role("admin")),
 ):
     """
-    Register a new user (Admin only).
+    Register a new user (Admin only). Password must meet configured policy requirements.
     """
     try:
         created = user_store.create_user(

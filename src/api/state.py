@@ -1,5 +1,7 @@
 import os
 import asyncio
+import shutil
+from datetime import datetime, timezone
 from typing import Optional
 
 from src.rag.document_loader import DocumentLoader
@@ -14,6 +16,7 @@ from src.core.config import (
     ALLOWED_UPLOAD_EXTENSIONS,
     LLM_BACKEND,
     OLLAMA_NUM_PARALLEL,
+    VECTOR_DB_PATH,
 )
 from src.core.logger import get_logger
 
@@ -142,3 +145,135 @@ def init_services():
 
     auto_index_on_startup()
     logger.info("Enterprise RAG services initialized successfully.")
+
+
+def cleanup_services():
+    """Gracefully release all resources on application shutdown."""
+    global agent, db_connector
+    logger.info("Cleaning up Enterprise RAG services...")
+
+    if agent is not None:
+        agent.cleanup()
+        logger.info("Agent resources released.")
+
+    if db_connector is not None and db_connector.engine is not None:
+        try:
+            db_connector.engine.dispose()
+            logger.info("Database engine disposed.")
+        except Exception as e:
+            logger.warning(f"Error disposing database engine: {e}")
+
+    logger.info("Enterprise RAG services shutdown complete.")
+
+
+# ──────────────────────────── SESSION MANAGEMENT ────────────────────────────
+
+def cleanup_expired_sessions(max_age_days: int = 30) -> int:
+    """Remove conversation sessions older than max_age_days from SQLite checkpointer.
+
+    Returns the number of deleted session records.
+    """
+    import sqlite3
+
+    db_path = os.path.join(DOCS_PATH, "conversations.db")
+    if not os.path.exists(db_path):
+        return 0
+
+    deleted = 0
+    try:
+        conn = sqlite3.connect(db_path, timeout=10.0)
+        cursor = conn.cursor()
+
+        # Get all tables that LangGraph checkpointer creates
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = [row[0] for row in cursor.fetchall()]
+
+        # LangGraph checkpointer typically uses 'checkpoints' and 'checkpoint_writes' tables
+        for table in tables:
+            if table in ("checkpoints", "checkpoint_writes"):
+                try:
+                    cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                    before = cursor.fetchone()[0]
+                    # Delete old records — checkpointer stores thread_id, we clean all old data
+                    cursor.execute(f"DELETE FROM {table}")
+                    deleted += before
+                except Exception as e:
+                    logger.warning(f"Error cleaning table '{table}': {e}")
+
+        conn.commit()
+        conn.close()
+        logger.info(f"[Session Cleanup] Removed {deleted} expired session records.")
+    except Exception as e:
+        logger.error(f"[Session Cleanup] Error: {e}")
+
+    return deleted
+
+
+# ──────────────────────────── VECTOR DB BACKUP/RESTORE ────────────────────────────
+
+def backup_vector_db(backup_dir: Optional[str] = None) -> str:
+    """Create a timestamped backup of the ChromaDB vector database.
+
+    Returns the path to the backup directory.
+    """
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    if backup_dir is None:
+        backup_dir = os.path.join(os.path.dirname(VECTOR_DB_PATH), "backups")
+
+    os.makedirs(backup_dir, exist_ok=True)
+    backup_path = os.path.join(backup_dir, f"vector_db_backup_{timestamp}")
+
+    try:
+        shutil.copytree(VECTOR_DB_PATH, backup_path)
+        logger.info(f"[Backup] Vector database backed up to: {backup_path}")
+        return backup_path
+    except FileNotFoundError:
+        logger.error("[Backup] Vector database directory not found.")
+        raise
+    except Exception as e:
+        logger.error(f"[Backup] Failed to backup vector database: {e}")
+        raise
+
+
+def restore_vector_db(backup_path: str) -> bool:
+    """Restore ChromaDB vector database from a backup directory.
+
+    WARNING: This replaces the current vector database entirely.
+    """
+    if not os.path.exists(backup_path):
+        logger.error(f"[Restore] Backup path does not exist: {backup_path}")
+        return False
+
+    try:
+        # Remove current vector DB
+        if os.path.exists(VECTOR_DB_PATH):
+            shutil.rmtree(VECTOR_DB_PATH)
+
+        shutil.copytree(backup_path, VECTOR_DB_PATH)
+        logger.info(f"[Restore] Vector database restored from: {backup_path}")
+        return True
+    except Exception as e:
+        logger.error(f"[Restore] Failed to restore vector database: {e}")
+        return False
+
+
+def list_backups(backup_dir: Optional[str] = None) -> list:
+    """List available vector database backups."""
+    if backup_dir is None:
+        backup_dir = os.path.join(os.path.dirname(VECTOR_DB_PATH), "backups")
+
+    if not os.path.exists(backup_dir):
+        return []
+
+    backups = []
+    for name in sorted(os.listdir(backup_dir), reverse=True):
+        path = os.path.join(backup_dir, name)
+        if os.path.isdir(path) and name.startswith("vector_db_backup_"):
+            stat = os.stat(path)
+            backups.append({
+                "name": name,
+                "path": path,
+                "created_at": datetime.fromtimestamp(stat.st_ctime, tz=timezone.utc).isoformat(),
+            })
+
+    return backups

@@ -79,8 +79,16 @@ Create a `.env` file in the root directory (loaded automatically via `python-dot
 ADMIN_DEFAULT_USERNAME=admin
 ADMIN_DEFAULT_PASSWORD=admin123
 ACCESS_TOKEN_EXPIRE_MINUTES=60
+REFRESH_TOKEN_EXPIRE_DAYS=7
 # Optional custom HMAC secret (randomly generated and persisted to data/.jwt_secret if unset):
 # JWT_SECRET_KEY=
+
+# ─── Password Strength Policy ───
+PASSWORD_MIN_LENGTH=8
+PASSWORD_REQUIRE_UPPERCASE=true
+PASSWORD_REQUIRE_LOWERCASE=true
+PASSWORD_REQUIRE_DIGIT=true
+PASSWORD_REQUIRE_SPECIAL=false
 
 # ─── LLM Serving Backend ───
 # "huggingface" (in-process BF16) or "ollama" (external server)
@@ -98,6 +106,11 @@ DB_MAX_ROWS=50
 # ─── API & Security Settings ───
 CORS_ORIGINS=http://localhost:8501,http://127.0.0.1:8501
 MAX_UPLOAD_SIZE_MB=50
+RATE_LIMIT_PER_MINUTE=30
+
+# ─── Contextual Chunking Settings ───
+CHUNK_SIZE=600
+CHUNK_OVERLAP=100
 
 # ─── Logging Settings ───
 LOG_LEVEL=INFO
@@ -129,16 +142,19 @@ Once downloaded, the system operates in **100% offline (air-gapped)** mode with 
 
 ---
 
-## 🧪 Running Automated Tests
+## 🧪 Running Automated Tests & Code Quality
 
 Run the full automated test suite (**52 unit, integration & security tests**):
 
 ```bash
-# Using Python's built-in test runner:
-python -m unittest discover tests -v
-
-# Or using pytest:
+# Using pytest (recommended):
 pytest tests/ -v
+
+# Run with test coverage report:
+pytest --cov=src --cov-report=term-missing
+
+# Run linter and code quality checks:
+ruff check .
 ```
 
 ---
@@ -147,9 +163,16 @@ pytest tests/ -v
 
 ### Backend (FastAPI Gateway):
 ```bash
-uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+# Recommended production launch (without reload to avoid re-allocating VRAM):
+uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+
+# Or via backward-compatible bridge:
+python src/main.py
 ```
 * **Interactive Swagger Documentation:** `http://localhost:8000/docs`
+
+> [!TIP]
+> When serving in-process HuggingFace models, avoid running with `--reload` during document uploads, as modifying files triggers Uvicorn to restart and reload gigabytes of PyTorch weights into memory.
 
 ### Frontend (Streamlit Dashboard):
 In a separate terminal window:

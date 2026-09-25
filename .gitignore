@@ -29,6 +29,10 @@ models/
 # Ortam Değişkenleri ve Gizli Anahtarlar
 .env
 .env.local
+!.env.example
+
+# JWT Secret (auto-generated, must never be committed)
+data/.jwt_secret
 
 # IDE ve Editör Ayarları
 .vscode/

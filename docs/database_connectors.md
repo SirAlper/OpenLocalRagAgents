@@ -52,13 +52,16 @@ DB_MAX_ROWS=50
 
 ## 🔒 Strict Read-Only Security Guard
 
-To prevent accidental data corruption or malicious command injection, multi-layer verification is enforced at the code level (`src/connectors/db_connector.py` & `src/connectors/db_loader.py`):
+To prevent accidental data corruption, privilege escalation, or SQL injection attacks, multi-layer verification is enforced at the code level (`src/connectors/db_connector.py` & `src/connectors/db_loader.py`):
 
-* **Mandatory `SELECT` Prefix:** Queries must begin with `SELECT` or `WITH ... SELECT`.
-* **Prohibited Keyword Guard:** Queries containing destructive statements (`DROP`, `INSERT`, `UPDATE`, `DELETE`, `ALTER`, `TRUNCATE`, `EXEC`, `CREATE`, `GRANT`, `REVOKE`) are aborted immediately.
-* **Table Whitelist Enforcement:** If `DB_ALLOWED_TABLES` is configured, `execute_query()` extracts all `FROM` and `JOIN` table identifiers and verifies they belong to the whitelist. Any attempt to access unauthorized tables (e.g. `salaries`, `users`) is blocked.
+* **AST-Based Lexical Parsing (`sqlparse`):** Rather than relying solely on surface regex patterns, queries are parsed into structured syntax trees via `sqlparse`:
+  - **Comment Stripping:** Inline comments (`--`) and block comments (`/* ... */`) are removed prior to analysis to eliminate comment-based obfuscation bypasses.
+  - **Stacked / Multi-Query Rejection:** Disallows chained query statements (e.g. `SELECT 1; DROP TABLE users;`) by enforcing exactly one valid statement per payload.
+  - **Statement Type Verification:** Rejects any query whose root statement type is not strictly `SELECT` or `WITH`.
+* **Prohibited Keyword Guards:** Scans parsed token trees to ensure destructive keywords (`DROP`, `INSERT`, `UPDATE`, `DELETE`, `ALTER`, `TRUNCATE`, `EXEC`, `CREATE`, `GRANT`, `REVOKE`, `INTO OUTFILE`, `LOAD_FILE`, etc.) do not appear in any clause.
+* **Table Whitelist Enforcement:** If `DB_ALLOWED_TABLES` is configured, `_validate_sql_safety()` extracts all referenced table identifiers and verifies them against the whitelist. Any attempt to access unauthorized tables (e.g. `salaries`, `users`) is blocked before reaching the database engine.
 * **ETL Loader Identifier Sanitization:** `DatabaseTableLoader.load_table_as_chunks()` validates that `table_name` is a valid identifier and exists in the connected database schema (`get_tables()`), eliminating SQL injection vectors.
-* **Memory Protection:** Result sets are capped at `max_rows` (configurable via `DB_MAX_ROWS`) to prevent server memory exhaustion.
+* **Memory Protection:** Result sets are capped at `max_rows` (configurable via `DB_MAX_ROWS`, default: 50) to prevent server memory exhaustion.
 
 ---
 

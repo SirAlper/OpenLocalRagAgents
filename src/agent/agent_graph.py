@@ -10,8 +10,9 @@ from src.core.logger import get_logger
 logger = get_logger("AgentGraph")
 
 
-class AgentState(TypedDict):
+class AgentState(TypedDict, total=False):
     question: str
+    search_query: str
     context: str
     sources: List[Dict[str, Any]]
     answer: str
@@ -29,6 +30,7 @@ class EnterpriseRAGAgent:
         self.chat_model = create_chat_model()
         self.nodes = AgentNodes(self.chat_model, self.rag_engine)
         self.checkpointer = checkpointer or self._init_default_checkpointer()
+        self._sqlite_conn = None  # Track connection for cleanup
         self.app = self._build_graph()
         self.service = QueryService(self.app, self.nodes, self.chat_model)
 
@@ -42,6 +44,7 @@ class EnterpriseRAGAgent:
             os.makedirs(DOCS_PATH, exist_ok=True)
             db_path = os.path.join(DOCS_PATH, "conversations.db")
             conn = sqlite3.connect(db_path, check_same_thread=False)
+            self._sqlite_conn = conn  # Store reference for cleanup
             saver = SqliteSaver(conn)
             saver.setup()
             logger.info(f"Initialized conversation checkpointer at {db_path}")
@@ -55,13 +58,15 @@ class EnterpriseRAGAgent:
         """Configure and compile the LangGraph state workflow with checkpointer."""
         workflow = StateGraph(AgentState)
 
+        workflow.add_node("rewrite", self.nodes.rewrite_query)
         workflow.add_node("retrieve", self.nodes.retrieve)
         workflow.add_node("generate", self.nodes.generate)
         workflow.add_node("grade", self.nodes.grade_hallucination)
         workflow.add_node("refine", self.nodes.refine)
         workflow.add_node("fallback", self.nodes.fallback)
 
-        workflow.set_entry_point("retrieve")
+        workflow.set_entry_point("rewrite")
+        workflow.add_edge("rewrite", "retrieve")
         workflow.add_edge("retrieve", "generate")
         workflow.add_edge("generate", "grade")
         workflow.add_conditional_edges(
@@ -89,3 +94,15 @@ class EnterpriseRAGAgent:
     def stream_query(self, question: str, thread_id: Optional[str] = None):
         """Stream final answer upon completion."""
         return self.service.stream_query(question, thread_id=thread_id)
+
+    # ──────────────────────────── RESOURCE CLEANUP ────────────────────────────
+
+    def cleanup(self):
+        """Release resources held by the agent (SQLite connections, etc.)."""
+        if self._sqlite_conn:
+            try:
+                self._sqlite_conn.close()
+                logger.info("Conversation checkpointer SQLite connection closed.")
+            except Exception as e:
+                logger.warning(f"Error closing SQLite connection: {e}")
+            self._sqlite_conn = None

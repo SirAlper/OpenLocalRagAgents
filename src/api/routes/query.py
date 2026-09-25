@@ -75,9 +75,14 @@ async def query_rag(
 @router.post("/api/v1/query-stream", summary="Query Enterprise AI Assistant (Event Stream)")
 async def query_rag_stream(
     request: QueryRequest,
+    http_req: Request,
     current_user: User = Depends(require_role("admin", "editor", "viewer")),
 ):
-    """Stream LangGraph stage events and deliver final answer via NDJSON format."""
+    """Stream LangGraph stage events and deliver final answer via NDJSON format.
+    All streamed queries are recorded in the compliance audit trail."""
+    start_time = time.time()
+    ip_addr = http_req.client.host if http_req.client else None
+
     try:
         thread_id = f"{current_user.username}_{request.session_id}" if request.session_id else None
         logger.info(
@@ -86,6 +91,11 @@ async def query_rag_stream(
         current_agent = get_agent()
 
         async def event_generator():
+            final_answer = ""
+            final_sources = []
+            is_refined = False
+            had_error = False
+
             async with query_concurrency_gate:
                 q: queue.Queue = queue.Queue()
                 sentinel = object()
@@ -110,11 +120,73 @@ async def query_rag_stream(
                         item = q.get()
                         if item is sentinel:
                             break
+                        # Capture final state for audit logging
+                        if isinstance(item, dict):
+                            if item.get("type") == "done":
+                                final_answer = item.get("answer", "")
+                                final_sources = item.get("sources", [])
+                                is_refined = item.get("is_refined", False)
+                            elif item.get("type") == "error":
+                                had_error = True
                         yield json.dumps(item, ensure_ascii=False) + "\n"
                     elif not thread.is_alive():
                         break
 
+            # Audit logging after stream completes
+            duration_ms = int((time.time() - start_time) * 1000)
+            source_names = [s.get("source") for s in final_sources if s.get("source")]
+            audit_logger.log(
+                username=current_user.username,
+                role=current_user.role,
+                action="query_stream",
+                detail=request.question,
+                sources=source_names,
+                answer_preview=final_answer,
+                ip_address=ip_addr,
+                duration_ms=duration_ms,
+                status="error" if had_error else "success",
+            )
+
         return StreamingResponse(event_generator(), media_type="application/x-ndjson")
     except Exception as e:
+        duration_ms = int((time.time() - start_time) * 1000)
+        audit_logger.log(
+            username=current_user.username,
+            role=current_user.role,
+            action="query_stream",
+            detail=request.question,
+            ip_address=ip_addr,
+            duration_ms=duration_ms,
+            status="error",
+        )
         logger.error(f"Error initiating streaming query: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/v1/feedback", summary="Submit Answer Feedback")
+async def submit_feedback(
+    request: Request,
+    current_user: User = Depends(require_role("admin", "editor", "viewer")),
+):
+    """Record thumbs up/down feedback for answer quality tracking."""
+    body = await request.json()
+    question = body.get("question", "")
+    feedback = body.get("feedback", "")  # "positive" or "negative"
+    comment = body.get("comment", "")
+    ip_addr = request.client.host if request.client else None
+
+    if feedback not in ("positive", "negative"):
+        raise HTTPException(status_code=400, detail="Feedback must be 'positive' or 'negative'.")
+
+    audit_logger.log(
+        username=current_user.username,
+        role=current_user.role,
+        action="feedback",
+        detail=f"[{feedback.upper()}] Q: {question[:200]}",
+        answer_preview=comment[:500] if comment else None,
+        ip_address=ip_addr,
+        status="success",
+    )
+
+    logger.info(f"Feedback '{feedback}' from '{current_user.username}' for: {question[:80]}")
+    return {"status": "success", "message": "Feedback recorded."}

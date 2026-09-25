@@ -34,6 +34,7 @@ class UserUpdate(BaseModel):
 
 class TokenResponse(BaseModel):
     access_token: str
+    refresh_token: Optional[str] = None
     token_type: str = "bearer"
     role: str
     username: str
@@ -45,7 +46,12 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
 class TokenData(BaseModel):
     username: str
     role: str
     exp: Optional[int] = None
+    token_type: str = "access"

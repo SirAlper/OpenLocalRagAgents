@@ -88,7 +88,7 @@ class TestAdminAuditEndpoints(unittest.TestCase):
         from src.auth.user_store import user_store
 
         if not user_store.get_user("audit_viewer"):
-            user_store.create_user("audit_viewer", "viewerpass123", "viewer")
+            user_store.create_user("audit_viewer", "ViewerPass123!", "viewer")
 
         admin_token, _ = create_access_token("admin", "admin")
         cls.admin_headers = {"Authorization": f"Bearer {admin_token}"}

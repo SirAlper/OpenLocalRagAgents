@@ -54,10 +54,12 @@ class TestMultiTurnMemory(unittest.TestCase):
         self.assertIn("Annual leave is 20 days", res1["answer"])
         self.assertEqual(len(res1.get("chat_history", [])), 1)
 
-        # Turn 2 in thread_alpha: verify history accumulated
+        # Turn 2 in thread_alpha: verify history accumulated (rewrite + generate + grade)
+        mock_rewrite = MagicMock()
+        mock_rewrite.content = "HR portal leave application submission process"
         mock_response_2 = MagicMock()
         mock_response_2.content = "Submit via HR portal."
-        mock_chat.invoke.side_effect = [mock_response_2, mock_grader]
+        mock_chat.invoke.side_effect = [mock_rewrite, mock_response_2, mock_grader]
 
         res2 = agent.query("Where do I apply?", thread_id="thread_alpha")
         self.assertEqual(len(res2.get("chat_history", [])), 2)

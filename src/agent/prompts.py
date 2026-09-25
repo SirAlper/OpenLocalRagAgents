@@ -37,6 +37,15 @@ NO_CONTEXT_RESPONSE = "This information is not found in company documents."
 
 FALLBACK_RESPONSE = "This information cannot be fully verified against company documents."
 
+SYSTEM_PROMPT_REWRITE = (
+    "You are a search query optimizer. Given the user's current question and recent conversation history, "
+    "rewrite the question into a clear, specific, standalone search query optimized for document retrieval.\n"
+    "Rules:\n"
+    "1. Resolve pronouns and references using conversation history (e.g., 'it' → the actual subject).\n"
+    "2. Keep the rewritten query concise (under 50 words).\n"
+    "3. Return ONLY the rewritten query text, nothing else."
+)
+
 
 # ──────────────────────────── MESSAGE BUILDERS ────────────────────────────
 
@@ -71,4 +80,19 @@ def build_refine_messages(context: str, question: str, draft_answer: str) -> lis
     return [
         SystemMessage(content=SYSTEM_PROMPT_REFINE),
         HumanMessage(content=f"Context:\n{context}\n\nQuestion: {question}\n\nDraft Answer:\n{draft_answer}")
+    ]
+
+
+def build_rewrite_messages(question: str, chat_history: list) -> list:
+    """Build LangChain message list for dynamic query rewriting and expansion."""
+    history_lines = [
+        f"User: {turn.get('question', '')}\nAssistant: {turn.get('answer', '')}"
+        for turn in chat_history[-3:]
+        if turn.get('question') and turn.get('answer')
+    ]
+    history_str = "\n".join(history_lines) if history_lines else "No prior conversation."
+
+    return [
+        SystemMessage(content=SYSTEM_PROMPT_REWRITE),
+        HumanMessage(content=f"Conversation History:\n{history_str}\n\nCurrent Question: {question}")
     ]

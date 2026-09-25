@@ -16,6 +16,7 @@ from src.core.config import (
     DATABASE_URL,
     DB_ALLOWED_TABLES,
     DB_MAX_ROWS,
+    SAMPLE_DB_PATH,
     CORS_ORIGINS,
     MAX_UPLOAD_SIZE_MB,
     ALLOWED_UPLOAD_EXTENSIONS,

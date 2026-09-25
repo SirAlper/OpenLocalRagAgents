@@ -187,7 +187,7 @@ class TestAuthAPIEndpoints(unittest.TestCase):
             viewer_resp = self.client.post(
                 "/api/v1/auth/register",
                 headers={"Authorization": f"Bearer {viewer_token}"},
-                json={"username": test_username, "password": "password123", "role": "viewer"},
+                json={"username": test_username, "password": "Password123!", "role": "viewer"},
             )
             self.assertEqual(viewer_resp.status_code, 403)
 
@@ -195,7 +195,7 @@ class TestAuthAPIEndpoints(unittest.TestCase):
             admin_resp = self.client.post(
                 "/api/v1/auth/register",
                 headers={"Authorization": f"Bearer {admin_token}"},
-                json={"username": test_username, "password": "password123", "role": "viewer"},
+                json={"username": test_username, "password": "Password123!", "role": "viewer"},
             )
             self.assertEqual(admin_resp.status_code, 201)
             self.assertEqual(admin_resp.json()["username"], test_username)
