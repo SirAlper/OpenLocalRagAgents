@@ -56,9 +56,11 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# --- AUTHENTICATION STATE & HELPERS ---
+# ─────────────────────── AUTHENTICATION STATE & HELPERS ───────────────────────
 if "auth_token" not in st.session_state:
     st.session_state.auth_token = None
+if "refresh_token" not in st.session_state:
+    st.session_state.refresh_token = None
 if "user_info" not in st.session_state:
     st.session_state.user_info = None
 
@@ -80,6 +82,7 @@ def login_api(username, password):
         if res.status_code == 200:
             data = res.json()
             st.session_state.auth_token = data["access_token"]
+            st.session_state.refresh_token = data.get("refresh_token")
             st.session_state.user_info = {
                 "username": data["username"],
                 "role": data["role"]
@@ -92,18 +95,43 @@ def login_api(username, password):
         return False, f"Connection error: {e}"
 
 
+def refresh_token_api():
+    """Attempt to refresh the access token using the stored refresh token."""
+    refresh = st.session_state.get("refresh_token")
+    if not refresh:
+        return False
+    try:
+        res = requests.post(
+            f"{API_BASE_URL}/api/v1/auth/refresh",
+            json={"refresh_token": refresh},
+            timeout=10,
+        )
+        if res.status_code == 200:
+            data = res.json()
+            st.session_state.auth_token = data["access_token"]
+            st.session_state.refresh_token = data.get("refresh_token", refresh)
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def logout():
     st.session_state.auth_token = None
+    st.session_state.refresh_token = None
     st.session_state.user_info = None
     st.rerun()
 
 
-# --- API HELPER FUNCTIONS ---
+# ─────────────────────── API HELPER FUNCTIONS ───────────────────────
 def fetch_stats():
     try:
         res = requests.get(f"{API_BASE_URL}/api/v1/stats", headers=get_auth_headers(), timeout=5)
         if res.status_code == 200:
             return res.json()
+        elif res.status_code == 401:
+            if refresh_token_api():
+                return fetch_stats()
     except Exception:
         return None
     return None
@@ -208,13 +236,29 @@ def query_rag_api(question):
         if res.status_code == 200:
             return res.json()
         elif res.status_code == 401:
-            return {"status": "error", "answer": "Session expired or unauthorized. Please log in again.", "sources": []}
+            if refresh_token_api():
+                return query_rag_api(question)
+            return {"status": "error", "answer": "Session expired. Please log in again.", "sources": []}
         return {"status": "error", "answer": f"Error: {res.text}", "sources": []}
     except Exception as e:
         return {"status": "error", "answer": f"API Connection Error: {e}", "sources": []}
 
 
-# --- SESSION STATE INITIALIZATION ---
+def submit_feedback_api(question, feedback, comment=""):
+    """Submit answer feedback (thumbs up/down) to the API."""
+    try:
+        res = requests.post(
+            f"{API_BASE_URL}/api/v1/feedback",
+            headers=get_auth_headers(),
+            json={"question": question, "feedback": feedback, "comment": comment},
+            timeout=10,
+        )
+        return res.status_code == 200
+    except Exception:
+        return False
+
+
+# ─────────────────────── SESSION STATE INITIALIZATION ───────────────────────
 if "session_id" not in st.session_state:
     st.session_state.session_id = uuid.uuid4().hex[:12]
 
@@ -228,11 +272,11 @@ if "messages" not in st.session_state:
     ]
 
 
-# --- SIDEBAR (CONTROL & AUTH PANEL) ---
+# ─────────────────────── SIDEBAR (CONTROL & AUTH PANEL) ───────────────────────
 with st.sidebar:
     st.title("⚙️ Control Panel")
 
-    # 1. Authentication Section
+    # ──── 1. Authentication Section ────
     if not st.session_state.auth_token:
         st.subheader("🔐 Enterprise Login")
         login_user = st.text_input("Username", key="login_username", placeholder="e.g., admin")
@@ -259,7 +303,7 @@ with st.sidebar:
             logout()
         st.divider()
 
-    # 2. System Status
+    # ──── 2. System Status ────
     if st.session_state.auth_token:
         stats = fetch_stats()
         if stats:
@@ -280,7 +324,7 @@ with st.sidebar:
 
         user_role = (st.session_state.user_info or {}).get("role", "viewer")
 
-        # 3. Document Upload (Admin & Editor only)
+        # ──── 3. Document Upload (Admin & Editor only) ────
         if user_role in ["admin", "editor"]:
             st.subheader("📤 Upload Document")
             uploaded_file = st.file_uploader(
@@ -300,7 +344,7 @@ with st.sidebar:
 
             st.divider()
 
-        # 4. Indexed Documents List & Deletion
+        # ──── 4. Indexed Documents List & Deletion ────
         st.subheader("📚 Indexed Documents")
         docs = fetch_documents()
         if docs:
@@ -323,7 +367,7 @@ with st.sidebar:
 
         st.divider()
 
-        # 5. Database Management (Admin only)
+        # ──── 5. Database Management (Admin only) ────
         if user_role == "admin":
             st.subheader("🗄️ Database")
             db_data = fetch_database_status()
@@ -355,7 +399,7 @@ with st.sidebar:
 
             st.divider()
 
-            # 6. Audit & Compliance Log Inspector (Admin only)
+            # ──── 6. Audit & Compliance Log Inspector (Admin only) ────
             st.subheader("🛡️ Audit Trail")
             with st.expander("📋 View Compliance Logs & Metrics"):
                 audit_stats = fetch_audit_stats()
@@ -364,9 +408,11 @@ with st.sidebar:
                     with c1:
                         st.metric("Total Events", audit_stats.get("total_records", 0))
                         st.metric("Queries", audit_stats.get("queries_executed", 0))
+                        st.metric("Stream Queries", audit_stats.get("stream_queries_executed", 0))
                     with c2:
                         st.metric("Uploads", audit_stats.get("documents_uploaded", 0))
                         st.metric("Logins", audit_stats.get("login_events", 0))
+                        st.metric("Feedback", audit_stats.get("feedback_events", 0))
 
                 logs = fetch_audit_logs(limit=15)
                 if logs:
@@ -395,7 +441,7 @@ with st.sidebar:
             st.rerun()
 
 
-# --- MAIN PANEL (CHAT) ---
+# ─────────────────────── MAIN PANEL (CHAT) ───────────────────────
 st.markdown('<div class="main-header">🏢 OpenLocalRagAgents Assistant</div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-header">Zero-leakage, on-premise generative AI assistant running 100% locally on your infrastructure.</div>', unsafe_allow_html=True)
 
@@ -403,7 +449,7 @@ if not st.session_state.auth_token:
     st.info("🔒 **Authentication Required:** Please log in using the Control Panel in the sidebar to access the Enterprise Assistant.")
 else:
     # Render Message History
-    for msg in st.session_state.messages:
+    for msg_idx, msg in enumerate(st.session_state.messages):
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
@@ -415,12 +461,27 @@ else:
             elif msg.get("verified") is False and msg.get("sources"):
                 st.caption("⚠️ *LangGraph Audit: Could not be fully verified against company documents.*")
 
+            # Feedback Buttons (for assistant messages with actual answers)
+            if msg.get("role") == "assistant" and msg.get("sources") and msg_idx > 0:
+                fb_col1, fb_col2, fb_col3 = st.columns([1, 1, 8])
+                with fb_col1:
+                    if st.button("👍", key=f"fb_up_{msg_idx}", help="This answer was helpful"):
+                        q = st.session_state.messages[msg_idx - 1].get("content", "") if msg_idx > 0 else ""
+                        submit_feedback_api(q, "positive")
+                        st.toast("Thank you for your feedback!", icon="👍")
+                with fb_col2:
+                    if st.button("👎", key=f"fb_down_{msg_idx}", help="This answer was not helpful"):
+                        q = st.session_state.messages[msg_idx - 1].get("content", "") if msg_idx > 0 else ""
+                        submit_feedback_api(q, "negative")
+                        st.toast("Feedback recorded. We'll work to improve!", icon="📝")
+
             # Render Referenced Sources
             if msg.get("sources"):
                 with st.expander(f"📚 Referenced Sources ({len(msg['sources'])} Chunks)"):
                     for idx, src in enumerate(msg["sources"], 1):
                         distance_info = f" (Distance: {src['distance']})" if src.get("distance") is not None else ""
-                        st.markdown(f"**{idx}. 📄 `{src['source']}` — Chunk #{src['chunk_index']}{distance_info}**")
+                        reranker_info = f" | Score: {src['reranker_score']}" if src.get("reranker_score") is not None else ""
+                        st.markdown(f"**{idx}. 📄 `{src['source']}` — Chunk #{src['chunk_index']}{distance_info}{reranker_info}**")
                         st.markdown(f"> *\"{src['content'].strip()}\"*")
                         st.write("")
 
@@ -458,7 +519,8 @@ else:
                 with st.expander(f"📚 Referenced Sources ({len(sources)} Chunks)"):
                     for idx, src in enumerate(sources, 1):
                         distance_info = f" (Distance: {src['distance']})" if src.get("distance") is not None else ""
-                        st.markdown(f"**{idx}. 📄 `{src['source']}` — Chunk #{src['chunk_index']}{distance_info}**")
+                        reranker_info = f" | Score: {src['reranker_score']}" if src.get("reranker_score") is not None else ""
+                        st.markdown(f"**{idx}. 📄 `{src['source']}` — Chunk #{src['chunk_index']}{distance_info}{reranker_info}**")
                         st.markdown(f"> *\"{src['content'].strip()}\"*")
                         st.write("")
 

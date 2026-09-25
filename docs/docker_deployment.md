@@ -31,6 +31,9 @@ The containerized deployment supports up to three decoupled services communicati
 ```
 
 * **Zero-Bloat Image:** Model weights (`models/`), vector indexes (`vector_db/`), and enterprise documents/databases (`data/`) are mounted dynamically as external host volumes.
+* **Multi-Stage Build Optimization:** The production [Dockerfile](file:///c:/Users/hanal/PycharmProjects/OpenLocalEnterpriseRag/Dockerfile) utilizes a two-stage build architecture:
+  1. *Builder Stage:* Compiles native extensions and installs dependencies.
+  2. *Runtime Stage:* Ultra-lean `python:3.11-slim` runner that copies only installed wheels and includes `curl` for container health checks, minimizing attack surface and disk footprint.
 * **Data Persistence:** Rebuilding or updating containers never deletes your documents, audit logs (`audit.db`), user accounts (`users.json`), conversation checkpoints (`conversations.db`), or vector collections.
 
 ---
@@ -102,8 +105,16 @@ OLLAMA_NUM_PARALLEL=4
 ADMIN_DEFAULT_USERNAME=admin
 ADMIN_DEFAULT_PASSWORD=admin123
 ACCESS_TOKEN_EXPIRE_MINUTES=60
+REFRESH_TOKEN_EXPIRE_DAYS=7
 # Optional custom HMAC secret (randomly generated and saved to data/.jwt_secret if empty):
 # JWT_SECRET_KEY=your_custom_secret_key
+
+# ─── Password Strength Policy ───
+PASSWORD_MIN_LENGTH=8
+PASSWORD_REQUIRE_UPPERCASE=true
+PASSWORD_REQUIRE_LOWERCASE=true
+PASSWORD_REQUIRE_DIGIT=true
+PASSWORD_REQUIRE_SPECIAL=false
 
 # ─── Relational Database (Optional) ───
 DATABASE_URL=sqlite:///./data/sample_enterprise.db
@@ -113,7 +124,12 @@ DB_MAX_ROWS=50
 # ─── API & Security ───
 CORS_ORIGINS=http://localhost:8501,http://127.0.0.1:8501,http://frontend:8501
 MAX_UPLOAD_SIZE_MB=50
+RATE_LIMIT_PER_MINUTE=30
 LOG_LEVEL=INFO
+
+# ─── Chunking Configuration ───
+CHUNK_SIZE=600
+CHUNK_OVERLAP=100
 ```
 
 ---

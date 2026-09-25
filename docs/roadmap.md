@@ -4,7 +4,28 @@ The strategic development roadmap for `OpenLocalRagAgents` is structured below t
 
 ---
 
-## 🔍 1. Advanced Retrieval & Structured Ingestion
+## 🚨 Phase 0 — Critical Bug Fixes & Security Hardening ✅
+
+> **Status: COMPLETED** — All critical issues resolved.
+
+- [x] **JWT Secret Key Management Hardening:**
+  - Added `.jwt_secret` to `.gitignore` to prevent accidental secret key exposure in version control.
+  - Documented mandatory `.env` configuration for production deployments via `.env.example`.
+- [x] **User Store Thread Safety Fix:**
+  - Replaced `threading.Lock` with `threading.RLock` in `UserStore` to prevent deadlocks from nested `get_user()` calls within `authenticate_user()`.
+- [x] **Core `__init__.py` Export Fix:**
+  - Added missing `SAMPLE_DB_PATH` import in `src/core/__init__.py` to resolve potential `ImportError` at runtime.
+- [x] **Stream Endpoint Audit Logging:**
+  - Implemented full audit trail logging for `/api/v1/query-stream` endpoint with answer capture and duration tracking.
+- [x] **SQLite Connection Lifecycle Management:**
+  - Implemented proper connection cleanup for the LangGraph `SqliteSaver` checkpointer via `agent.cleanup()`.
+  - Added graceful shutdown hooks in FastAPI lifespan via `cleanup_services()`.
+- [x] **`.env.example` Template:**
+  - Created comprehensive `.env.example` documenting all environment variables with safe defaults and inline comments.
+
+---
+
+## 🔍 Phase 1 — Advanced Retrieval & Structured Ingestion
 
 - [ ] **Hybrid Search (BM25 + Dense Vector with Reciprocal Rank Fusion):**
   - Merge semantic dense vector search with sparse keyword/code matching (BM25) via *Reciprocal Rank Fusion (RRF)* to achieve 100% precision on SKU codes and technical terminology.
@@ -14,30 +35,41 @@ The strategic development roadmap for `OpenLocalRagAgents` is structured below t
   - Multi-tier indexing that performs granular vector search on small child chunks while providing parent contextual blocks to the LLM during generation.
 - [ ] **Graph-Augmented RAG (GraphRAG):**
   - Transform enterprise entities and document relations into Knowledge Graphs for multi-hop causal reasoning and cross-departmental impact analysis.
+- [x] **Configurable Chunking Parameters:**
+  - Exposed `CHUNK_SIZE` and `CHUNK_OVERLAP` as environment variables instead of hardcoded values in `DocumentLoader`.
+- [ ] **Document Versioning & History:**
+  - Track document upload/re-upload history with version timestamps and diff metadata.
+  - Allow admins to rollback to previous document versions.
 
 ---
 
-## 🤖 2. Next-Gen Agentic RAG
+## 🤖 Phase 2 — Next-Gen Agentic RAG
 
 - [x] **Multi-Turn Conversational Memory (LangGraph Checkpointer):**
   - Integrated LangGraph SQLite checkpointer (`conversations.db`) and session-based thread tracking (`thread_id`).
   - Contextual retrieval query enrichment and conversational history retention across turns.
-- [ ] **Dynamic Query Rewriting & Expansion:**
-  - Autonomous agent node to rewrite ambiguous user prompts into optimized search representations before querying the vector store.
+- [x] **Dynamic Query Rewriting & Expansion:**
+  - Autonomous `rewrite` node in LangGraph that rewrites ambiguous user prompts into optimized search representations before querying the vector store.
+  - Resolves pronouns and references using conversation history for multi-turn coherence.
 - [x] **Closed-Loop Self-Correction & Refinement:**
   - Integrated `refine` node in LangGraph routed back to `grade` to audit refined responses, ensuring high factual fidelity.
 - [x] **Universal Relational Database Connector & Text-to-SQL Tools:**
   - SQLAlchemy-based connector layer supporting PostgreSQL, MSSQL, MySQL, Oracle, and SQLite.
   - Strict read-only query guardrails, automatic `LIMIT` capping, and table whitelisting.
   - Table-to-vector ETL pipeline (`DatabaseTableLoader`) and agent tools (`sql_db_query`, `sql_db_schema`).
-- [ ] **Multi-Agent Supervisor Teams (Upcoming):**
-  - Supervisor pattern to route queries dynamically across specialized agents (Documentation Agent, SQL Data Agent).
-- [ ] **User Feedback Loop:**
-  - Thumbs up/down feedback widget in Streamlit UI to track and log answer ground truth metrics.
+- [ ] **Multi-Agent Supervisor Teams:**
+  - Supervisor pattern to route queries dynamically across specialized agents (Documentation Agent, SQL Data Agent, Code Analysis Agent).
+- [x] **User Feedback Loop:**
+  - Thumbs up/down feedback buttons in Streamlit UI with `/api/v1/feedback` API endpoint.
+  - Feedback events recorded in the compliance audit trail for answer quality tracking.
+- [x] **Conversation Session Management:**
+  - Admin endpoint `/api/v1/admin/cleanup-sessions` for TTL-based cleanup of expired sessions.
+- [x] **SQL Injection Guard Enhancement:**
+  - AST-based SQL parser (`sqlparse`) added alongside regex for defense against comment-based bypass and encoding attacks.
 
 ---
 
-## ⚡ 3. Serving Optimization & Inference Acceleration
+## ⚡ Phase 3 — Serving Optimization & Inference Acceleration
 
 - [x] **Request Serialization & Concurrency Protection:**
   - Integrated `QueryConcurrencyManager` with dual-mode support: serialized `asyncio.Lock` for in-process HuggingFace, and parallel `asyncio.Semaphore` for Ollama serving.
@@ -48,10 +80,15 @@ The strategic development roadmap for `OpenLocalRagAgents` is structured below t
   - Cache recurring queries using vector similarity (Redis / GPTCache) to answer repeated enterprise questions with near-zero latency.
 - [ ] **Speculative Decoding:**
   - Accelerate local LLM token generation using small draft models.
+- [x] **API Rate Limiting:**
+  - Per-IP rate limiting middleware in FastAPI with configurable `RATE_LIMIT_PER_MINUTE` via environment variables.
+  - Returns `429 Too Many Requests` with `Retry-After` header.
+- [ ] **WebSocket Streaming Support:**
+  - Replace NDJSON-based streaming with WebSocket connections for lower-latency, bidirectional real-time communication.
 
 ---
 
-## 🏢 4. Enterprise Security, Governance & DevOps
+## 🏢 Phase 4 — Enterprise Security, Governance & DevOps
 
 - [x] **Automated Testing Suite (52 Tests):**
   - Comprehensive unit and integration tests covering LangGraph decision branches, read-only SQL guards, file upload security, authentication/RBAC, multi-turn memory, Ollama serving, resource stability, and audit trail logging.
@@ -67,7 +104,43 @@ The strategic development roadmap for `OpenLocalRagAgents` is structured below t
   - Admin compliance inspection dashboard and statistics in both REST API and Streamlit UI.
 - [ ] **Observability & Tracing:**
   - OpenTelemetry, Langfuse, or Arize Phoenix integration to trace latency, token consumption, and retrieval fidelity.
+  - Prometheus `/metrics` endpoint with GPU VRAM usage, model load status, queue depth, and request latency histograms.
+  - Grafana dashboard templates for production monitoring.
 - [x] **One-Command Containerization (Docker & NVIDIA Container Toolkit):**
-  - Production-ready Dockerfile and docker-compose configurations with GPU passthrough for automated server provisioning.
+  - Production-ready multi-stage Dockerfile and docker-compose configurations with GPU passthrough for automated server provisioning.
 - [ ] **Enterprise SSO & Directory Integration:**
   - SAML 2.0 / OAuth2 integration with Active Directory, Okta, and Keycloak for enterprise-grade authentication.
+- [x] **JWT Refresh Token Flow:**
+  - Short-lived access tokens + long-lived refresh tokens via `/api/v1/auth/refresh` endpoint.
+  - Automatic token refresh in Streamlit UI for seamless user experience.
+- [x] **Password Policy Enforcement:**
+  - Configurable minimum length, uppercase/lowercase, digit, and special character requirements via environment variables.
+  - Enforced during user creation in `UserStore.create_user()`.
+- [ ] **Multi-Tenant Document Isolation:**
+  - Department-level or organization-level document namespace isolation, allowing each tenant to maintain private knowledge bases.
+- [x] **ChromaDB Backup & Restore:**
+  - Admin API endpoints: `/api/v1/admin/backup`, `/api/v1/admin/backups`, `/api/v1/admin/restore` for point-in-time backup and restore.
+- [x] **Dockerfile Multi-Stage Optimization:**
+  - Split into builder + runtime stages to reduce production image size by removing `build-essential`, `git`, and development dependencies.
+
+---
+
+## 🛠️ Phase 5 — Code Quality & Developer Experience
+
+> **Priority: Ongoing** — Improvements to maintainability, developer onboarding, and open-source readiness.
+
+- [ ] **Streamlit Multi-Page Refactoring:**
+  - Refactor the monolithic `ui/app.py` into Streamlit multi-page architecture (`pages/` directory) with dedicated pages for Chat, Documents, Database, Audit, and Admin.
+- [x] **Specific Exception Handling:**
+  - Replaced broad `except Exception as e` blocks in `nodes.py`, `jwt_handler.py` with specific exception types (`ConnectionError`, `TimeoutError`, `IOError`, `OSError`, `RuntimeError`).
+- [ ] **Async Node Migration:**
+  - Evaluate and document the sync-to-async migration path for LangGraph agent nodes to eliminate `asyncio.to_thread()` overhead.
+- [ ] **Test Coverage Expansion:**
+  - Add end-to-end integration tests with model loading, API endpoint tests for upload/stream/database routes, and Streamlit UI tests.
+  - Integrate `pytest-cov` with minimum 80% coverage target and CI gate.
+- [x] **CONTRIBUTING.md & Code of Conduct:**
+  - Created contributor guidelines, PR template, code style guide, and code of conduct for open-source community readiness.
+- [x] **CI/CD Pipeline:**
+  - GitHub Actions workflow for automated testing (Python 3.10/3.11/3.12), linting (`ruff`), coverage reporting, and Docker image build validation.
+- [ ] **API Versioning Strategy:**
+  - Document and enforce `/api/v1/` versioning convention with deprecation policy for future `/api/v2/` migration.

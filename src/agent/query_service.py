@@ -58,7 +58,12 @@ class QueryService:
             "chat_history": prior_history
         }
 
-        # 1. RETRIEVE
+        # 1. REWRITE (Dynamic Query Optimization)
+        yield {"type": "status", "message": "🔄 Optimizing search query...", "node": "rewrite"}
+        rewrite_out = self.nodes.rewrite_query(state)
+        state["search_query"] = rewrite_out.get("search_query", state["question"])
+
+        # 2. RETRIEVE
         yield {"type": "status", "message": "🔍 Searching relevant enterprise documents...", "node": "retrieve"}
         retrieve_out = self.nodes.retrieve(state)
         state["context"] = retrieve_out["context"]
@@ -70,13 +75,13 @@ class QueryService:
             yield {"type": "done", "answer": NO_CONTEXT_RESPONSE, "sources": [], "is_refined": False}
             return
 
-        # 2. GENERATE
+        # 3. GENERATE
         yield {"type": "status", "message": "✍️ Preparing response...", "node": "generate"}
         generate_out = self.nodes.generate(state)
         state["answer"] = generate_out["answer"]
         state["chat_history"] = generate_out.get("chat_history", state["chat_history"])
 
-        # 3. GRADE & REFINE LOOP
+        # 4. GRADE & REFINE LOOP
         while True:
             yield {"type": "status", "message": "🛡️ Verifying factual accuracy...", "node": "grade"}
             grade_out = self.nodes.grade_hallucination(state)

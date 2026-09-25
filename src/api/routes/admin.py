@@ -1,9 +1,15 @@
 from typing import Optional
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.auth.dependencies import require_role
 from src.auth.models import User
 from src.core.audit import audit_logger
+from src.api.state import (
+    cleanup_expired_sessions,
+    backup_vector_db,
+    restore_vector_db,
+    list_backups,
+)
 from src.core.logger import get_logger
 
 logger = get_logger("API.Admin")
@@ -51,17 +57,127 @@ def get_audit_stats(_: User = Depends(require_role("admin"))):
     """
     total_logs = audit_logger.count_logs()
     total_queries = audit_logger.count_logs(action="query")
+    total_stream_queries = audit_logger.count_logs(action="query_stream")
     total_uploads = audit_logger.count_logs(action="upload")
     total_deletions = audit_logger.count_logs(action="delete")
     total_logins = audit_logger.count_logs(action="login")
     total_errors = audit_logger.count_logs(status="error")
+    total_feedback = audit_logger.count_logs(action="feedback")
 
     return {
         "status": "success",
         "total_records": total_logs,
         "queries_executed": total_queries,
+        "stream_queries_executed": total_stream_queries,
         "documents_uploaded": total_uploads,
         "documents_deleted": total_deletions,
         "login_events": total_logins,
         "error_events": total_errors,
+        "feedback_events": total_feedback,
+    }
+
+
+# ──────────────────────────── SESSION MANAGEMENT ────────────────────────────
+
+@router.post("/cleanup-sessions", summary="Cleanup Expired Conversation Sessions")
+def cleanup_sessions(
+    max_age_days: int = Query(30, ge=1, le=365, description="Maximum session age in days"),
+    current_admin: User = Depends(require_role("admin")),
+):
+    """
+    Remove conversation sessions older than the specified number of days (Admin only).
+    """
+    deleted = cleanup_expired_sessions(max_age_days=max_age_days)
+
+    audit_logger.log(
+        username=current_admin.username,
+        role=current_admin.role,
+        action="session_cleanup",
+        detail=f"Cleaned up sessions older than {max_age_days} days ({deleted} records removed)",
+        status="success",
+    )
+
+    return {
+        "status": "success",
+        "message": f"Removed {deleted} expired session records.",
+        "deleted_records": deleted,
+    }
+
+
+# ──────────────────────────── VECTOR DB BACKUP/RESTORE ────────────────────────────
+
+@router.post("/backup", summary="Create Vector Database Backup")
+def create_backup(current_admin: User = Depends(require_role("admin"))):
+    """
+    Create a timestamped backup of the ChromaDB vector database (Admin only).
+    """
+    try:
+        backup_path = backup_vector_db()
+        audit_logger.log(
+            username=current_admin.username,
+            role=current_admin.role,
+            action="backup_create",
+            detail=f"Vector database backed up to: {backup_path}",
+            status="success",
+        )
+        return {
+            "status": "success",
+            "message": "Vector database backup created successfully.",
+            "backup_path": backup_path,
+        }
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Vector database directory not found.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Backup failed: {e}")
+
+
+@router.get("/backups", summary="List Available Backups")
+def get_backups(_: User = Depends(require_role("admin"))):
+    """
+    List all available vector database backups (Admin only).
+    """
+    backups = list_backups()
+    return {
+        "status": "success",
+        "count": len(backups),
+        "backups": backups,
+    }
+
+
+@router.post("/restore", summary="Restore Vector Database from Backup")
+def restore_backup(
+    backup_name: str = Query(..., description="Name of the backup directory to restore"),
+    current_admin: User = Depends(require_role("admin")),
+):
+    """
+    Restore ChromaDB vector database from a named backup (Admin only).
+    WARNING: This replaces the current vector database entirely.
+    """
+    import os
+    from src.core.config import VECTOR_DB_PATH
+
+    backup_dir = os.path.join(os.path.dirname(VECTOR_DB_PATH), "backups")
+    backup_path = os.path.join(backup_dir, backup_name)
+
+    # Security: prevent path traversal
+    real_backup = os.path.realpath(backup_path)
+    real_backup_dir = os.path.realpath(backup_dir)
+    if not real_backup.startswith(real_backup_dir):
+        raise HTTPException(status_code=400, detail="Invalid backup name.")
+
+    success = restore_vector_db(backup_path)
+    if not success:
+        raise HTTPException(status_code=400, detail=f"Restore failed. Backup '{backup_name}' may not exist.")
+
+    audit_logger.log(
+        username=current_admin.username,
+        role=current_admin.role,
+        action="backup_restore",
+        detail=f"Vector database restored from: {backup_name}",
+        status="success",
+    )
+
+    return {
+        "status": "success",
+        "message": f"Vector database restored from '{backup_name}'. Restart the server for changes to take effect.",
     }

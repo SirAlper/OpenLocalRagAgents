@@ -147,13 +147,66 @@ class DatabaseConnector:
         except Exception as e:
             return f"Error extracting schema: {e}"
 
+    def _validate_sql_safety(self, query: str) -> tuple[bool, str]:
+        """Validate SQL query safety using both regex and AST-based parsing.
+
+        Returns (is_safe, error_message). If is_safe is True, error_message is empty.
+        """
+        clean_query = query.strip().rstrip(";").strip()
+
+        # 1. Strict Read-Only Guard against data modification keywords
+        forbidden_pattern = r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|EXEC|EXECUTE|CREATE|GRANT|REVOKE|REPLACE)\b"
+        if re.search(forbidden_pattern, clean_query, re.IGNORECASE):
+            return False, "Security Guard: Only read-only (SELECT) queries are allowed."
+
+        # 2. Must start with SELECT or WITH
+        if not re.match(r"^(SELECT|WITH)\b", clean_query, re.IGNORECASE):
+            return False, "Invalid Query: Query must start with 'SELECT' or 'WITH'."
+
+        # 3. AST-based validation using sqlparse (defense against comment-based bypass)
+        try:
+            import sqlparse
+            parsed = sqlparse.parse(clean_query)
+            if not parsed:
+                return False, "Invalid Query: Could not parse SQL statement."
+
+            for statement in parsed:
+                stmt_type = statement.get_type()
+                if stmt_type and stmt_type.upper() not in ("SELECT", "UNKNOWN"):
+                    return False, f"Security Guard: Statement type '{stmt_type}' is not permitted. Only SELECT is allowed."
+
+                # Check for dangerous tokens within parsed statement
+                flat_tokens = list(statement.flatten())
+                for token in flat_tokens:
+                    token_upper = str(token).upper().strip()
+                    if token_upper in ("INSERT", "UPDATE", "DELETE", "DROP", "ALTER",
+                                       "TRUNCATE", "EXEC", "EXECUTE", "CREATE",
+                                       "GRANT", "REVOKE", "REPLACE"):
+                        return False, f"Security Guard: Forbidden keyword '{token_upper}' detected in parsed query."
+        except ImportError:
+            # sqlparse not installed, fall back to regex-only validation
+            logger.warning("sqlparse not installed, using regex-only SQL validation.")
+        except Exception as e:
+            logger.warning(f"SQL parsing error, falling back to regex validation: {e}")
+
+        # 4. Table Access Restriction (if allowed_tables is specified)
+        if self.allowed_tables:
+            referenced_tables = re.findall(r"\b(?:FROM|JOIN)\s+([a-zA-Z0-9_]+)", clean_query, re.IGNORECASE)
+            for tbl in referenced_tables:
+                if tbl not in self.allowed_tables:
+                    logger.warning(f"Unauthorized table access attempt: '{tbl}' in query: '{clean_query}'")
+                    return False, f"Security Guard: Access to table '{tbl}' is not permitted."
+
+        return True, ""
+
     def execute_query(self, query: str) -> Dict[str, Any]:
         """Execute SQL query subject to strict read-only security guards.
 
         Security Rules:
         1. Only 'SELECT' or 'WITH ... SELECT' queries are permitted.
         2. 'INSERT', 'UPDATE', 'DELETE', 'DROP', 'ALTER', 'TRUNCATE', 'EXEC' are strictly blocked.
-        3. Result rows are capped at max_rows.
+        3. AST-based SQL parsing validates query structure beyond simple regex.
+        4. Result rows are capped at max_rows.
         """
         if not self.is_connected or not self.engine:
             return {
@@ -165,37 +218,15 @@ class DatabaseConnector:
 
         clean_query = query.strip().rstrip(";").strip()
 
-        # 1. Strict Read-Only Guard against data modification keywords
-        forbidden_pattern = r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|EXEC|EXECUTE|CREATE|GRANT|REVOKE|REPLACE)\b"
-        if re.search(forbidden_pattern, clean_query, re.IGNORECASE):
+        # Validate SQL safety
+        is_safe, error_msg = self._validate_sql_safety(clean_query)
+        if not is_safe:
             return {
                 "status": "error",
-                "message": "Security Guard: Only read-only (SELECT) queries are allowed.",
+                "message": error_msg,
                 "columns": [],
                 "rows": []
             }
-
-        # 2. Must start with SELECT or WITH
-        if not re.match(r"^(SELECT|WITH)\b", clean_query, re.IGNORECASE):
-            return {
-                "status": "error",
-                "message": "Invalid Query: Query must start with 'SELECT' or 'WITH'.",
-                "columns": [],
-                "rows": []
-            }
-
-        # 3. Table Access Restriction (if allowed_tables is specified)
-        if self.allowed_tables:
-            referenced_tables = re.findall(r"\b(?:FROM|JOIN)\s+([a-zA-Z0-9_]+)", clean_query, re.IGNORECASE)
-            for tbl in referenced_tables:
-                if tbl not in self.allowed_tables:
-                    logger.warning(f"Unauthorized table access attempt: '{tbl}' in query: '{clean_query}'")
-                    return {
-                        "status": "error",
-                        "message": f"Security Guard: Access to table '{tbl}' is not permitted.",
-                        "columns": [],
-                        "rows": []
-                    }
 
         try:
             from sqlalchemy import text

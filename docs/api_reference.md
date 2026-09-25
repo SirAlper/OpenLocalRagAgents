@@ -10,9 +10,10 @@ The interactive OpenAPI Swagger UI is available at `http://localhost:8000/docs` 
 
 | Method | Endpoint | Required Role | Description |
 | :--- | :--- | :---: | :--- |
-| `POST` | `/api/v1/auth/login` | Public | Obtain signed JWT Bearer access token |
+| `POST` | `/api/v1/auth/login` | Public | Obtain signed JWT Bearer access token and refresh token |
+| `POST` | `/api/v1/auth/refresh` | Public | Exchange refresh token for fresh access and refresh token pair |
 | `GET` | `/api/v1/auth/me` | Authenticated | View current authenticated user profile |
-| `POST` | `/api/v1/auth/register` | `admin` | Register new user account with specified role |
+| `POST` | `/api/v1/auth/register` | `admin` | Register new user account with password policy enforcement |
 | `GET` | `/api/v1/auth/users` | `admin` | List all registered enterprise user accounts |
 | `PATCH` | `/api/v1/auth/users/{username}` | `admin` | Update user status (disable/enable), role, or reset password |
 | `DELETE` | `/api/v1/auth/users/{username}` | `admin` | Permanently delete a registered user account |
@@ -21,12 +22,17 @@ The interactive OpenAPI Swagger UI is available at `http://localhost:8000/docs` 
 | `POST` | `/api/v1/upload-file` | `admin`, `editor` | Upload new PDF, DOCX, or TXT document and auto-index into ChromaDB |
 | `DELETE` | `/api/v1/documents/{filename}` | `admin`, `editor` | Permanently delete document from disk and purge chunks from vector store |
 | `POST` | `/api/v1/query` | Authenticated | Batch question answering with multi-turn session memory |
-| `POST` | `/api/v1/query-stream` | Authenticated | Stage event streaming (NDJSON protocol) with final answer |
+| `POST` | `/api/v1/query-stream` | Authenticated | Stage event streaming (NDJSON protocol) with dynamic rewrite and final answer |
+| `POST` | `/api/v1/feedback` | Authenticated | Submit thumbs-up/down evaluation on agent answers |
 | `GET` | `/api/v1/database/status` | Authenticated | Database connection status, dialect type, and schema summary |
 | `POST` | `/api/v1/database/test-query` | `admin` | Execute safe read-only SELECT queries |
 | `POST` | `/api/v1/database/sync-table` | `admin` | Convert database table rows into ChromaDB vector chunks |
 | `GET` | `/api/v1/admin/audit-logs` | `admin` | Filter and inspect compliance audit trail logs |
-| `GET` | `/api/v1/admin/audit-stats` | `admin` | Metrics summary (queries, uploads, logins, errors) |
+| `GET` | `/api/v1/admin/audit-stats` | `admin` | Metrics summary (queries, uploads, logins, errors, feedback) |
+| `POST` | `/api/v1/admin/cleanup-sessions`| `admin` | Prune conversation sessions older than specified age |
+| `POST` | `/api/v1/admin/backup` | `admin` | Create timestamped ChromaDB vector database snapshot |
+| `GET` | `/api/v1/admin/backups` | `admin` | List available ChromaDB backup snapshots |
+| `POST` | `/api/v1/admin/restore` | `admin` | Restore ChromaDB vector database from an existing snapshot |
 
 > [!NOTE]
 > All protected endpoints require the HTTP header:  
@@ -37,7 +43,7 @@ The interactive OpenAPI Swagger UI is available at `http://localhost:8000/docs` 
 ## 🔐 1. Authentication & User Management Endpoints
 
 ### 1.1 User Login (`POST /api/v1/auth/login`)
-Authenticates credentials and issues a signed JWT token valid for `ACCESS_TOKEN_EXPIRE_MINUTES` (default: 60 minutes).
+Authenticates credentials and issues a signed JWT Bearer access token valid for `ACCESS_TOKEN_EXPIRE_MINUTES` (default: 60 minutes) and a long-lived refresh token valid for `REFRESH_TOKEN_EXPIRE_DAYS` (default: 7 days).
 
 ```bash
 curl -X POST "http://localhost:8000/api/v1/auth/login" \
@@ -52,6 +58,7 @@ curl -X POST "http://localhost:8000/api/v1/auth/login" \
 ```json
 {
   "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
   "token_type": "bearer",
   "role": "admin",
   "username": "admin",
@@ -61,7 +68,32 @@ curl -X POST "http://localhost:8000/api/v1/auth/login" \
 
 ---
 
-### 1.2 Current User Profile (`GET /api/v1/auth/me`)
+### 1.2 Refresh Access Token (`POST /api/v1/auth/refresh`)
+Exchange a valid refresh token for a fresh access token and rotated refresh token pair without re-entering credentials.
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/auth/refresh" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+     }'
+```
+
+**Example Response (HTTP 200):**
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer",
+  "role": "admin",
+  "username": "admin",
+  "expires_in": 3600
+}
+```
+
+---
+
+### 1.3 Current User Profile (`GET /api/v1/auth/me`)
 Returns the profile and role of the caller identified by the JWT token.
 
 ```bash
@@ -81,10 +113,11 @@ curl -X GET "http://localhost:8000/api/v1/auth/me" \
 
 ---
 
-### 1.3 Register User (`POST /api/v1/auth/register`)
+### 1.4 Register User (`POST /api/v1/auth/register`)
 Registers a new enterprise user. Restricted to `admin` role.
 
 * **Roles Available:** `admin`, `editor`, `viewer`
+* **Password Policy:** Passwords must meet configurable enterprise security rules (minimum 8 characters, uppercase, lowercase, and digit required by default).
 
 ```bash
 curl -X POST "http://localhost:8000/api/v1/auth/register" \
@@ -109,7 +142,7 @@ curl -X POST "http://localhost:8000/api/v1/auth/register" \
 
 ---
 
-### 1.4 List All Users (`GET /api/v1/auth/users`)
+### 1.5 List All Users (`GET /api/v1/auth/users`)
 Lists all registered enterprise users. Restricted to `admin` role.
 
 ```bash
@@ -119,7 +152,7 @@ curl -X GET "http://localhost:8000/api/v1/auth/users" \
 
 ---
 
-### 1.5 Update User (`PATCH /api/v1/auth/users/{username}`)
+### 1.6 Update User (`PATCH /api/v1/auth/users/{username}`)
 Modifies a user's role, status (enable/disable), or resets their password. Restricted to `admin` role.
 
 ```bash
@@ -134,7 +167,7 @@ curl -X PATCH "http://localhost:8000/api/v1/auth/users/jane_analyst" \
 
 ---
 
-### 1.6 Delete User (`DELETE /api/v1/auth/users/{username}`)
+### 1.7 Delete User (`DELETE /api/v1/auth/users/{username}`)
 Deletes a user account. The primary default administrator cannot be deleted. Restricted to `admin` role.
 
 ```bash
@@ -299,6 +332,7 @@ curl -X POST "http://localhost:8000/api/v1/query-stream" \
 
 **Delivered NDJSON Event Sequence:**
 ```json
+{"type": "status", "message": "🔄 Optimizing search query...", "node": "rewrite"}
 {"type": "status", "message": "🔍 Searching relevant enterprise documents...", "node": "retrieve"}
 {"type": "sources", "sources": [{"source": "IT_Support_Runbook.docx", "chunk_index": 1, ...}]}
 {"type": "status", "message": "✍️ Preparing response...", "node": "generate"}
@@ -307,6 +341,32 @@ curl -X POST "http://localhost:8000/api/v1/query-stream" \
 {"type": "done", "answer": "...", "sources": [...], "is_refined": false}
 ```
 *(If unverified, emits a `"node": "refine"` stage and re-evaluates before emitting `"type": "done"`).*
+
+---
+
+### 3.3 Answer Evaluation Feedback (`POST /api/v1/feedback`)
+Records user thumbs-up / thumbs-down evaluation and optional comments for answer quality tracking and governance audits.
+
+* **Required Role:** Authenticated (`admin`, `editor`, `viewer`)
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/feedback" \
+     -H "Authorization: Bearer <token>" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "question": "How does the hardware replacement approval process work?",
+       "feedback": "positive",
+       "comment": "Accurate response with exact runbook references."
+     }'
+```
+
+**Example Response (HTTP 200):**
+```json
+{
+  "status": "success",
+  "message": "Feedback recorded."
+}
+```
 
 ---
 
@@ -448,16 +508,138 @@ curl -X GET "http://localhost:8000/api/v1/admin/audit-stats" \
   "status": "success",
   "total_records": 150,
   "queries_executed": 112,
+  "stream_queries_executed": 45,
   "documents_uploaded": 8,
   "documents_deleted": 2,
   "login_events": 24,
-  "error_events": 4
+  "error_events": 4,
+  "feedback_events": 18
 }
 ```
 
 ---
 
-## 🔒 CORS Configuration
+### 5.3 Session Cleanup (`POST /api/v1/admin/cleanup-sessions`)
+Removes stale conversation sessions and checkpointer records older than the specified retention window.
+
+* **Required Role:** `admin`
+* **Query Parameters:**
+  * `max_age_days` *(int, optional, default: 30, range: 1-365)*: Maximum session age in days before pruning.
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/admin/cleanup-sessions?max_age_days=14" \
+     -H "Authorization: Bearer <admin_token>"
+```
+
+**Example Response (HTTP 200):**
+```json
+{
+  "status": "success",
+  "message": "Removed 12 expired session records.",
+  "deleted_records": 12
+}
+```
+
+---
+
+### 5.4 Create Vector Database Backup (`POST /api/v1/admin/backup`)
+Creates a complete, atomic timestamped archive snapshot of the ChromaDB vector database directory.
+
+* **Required Role:** `admin`
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/admin/backup" \
+     -H "Authorization: Bearer <admin_token>"
+```
+
+**Example Response (HTTP 200):**
+```json
+{
+  "status": "success",
+  "message": "Vector database backup created successfully.",
+  "backup_path": "backups/vector_db_20260925_220000"
+}
+```
+
+---
+
+### 5.5 List Vector Database Backups (`GET /api/v1/admin/backups`)
+Lists all available ChromaDB backup snapshot archives with timestamp and size metadata.
+
+* **Required Role:** `admin`
+
+```bash
+curl -X GET "http://localhost:8000/api/v1/admin/backups" \
+     -H "Authorization: Bearer <admin_token>"
+```
+
+**Example Response (HTTP 200):**
+```json
+{
+  "status": "success",
+  "count": 2,
+  "backups": [
+    {
+      "name": "vector_db_20260925_220000",
+      "created_at": "2026-09-25T22:00:00",
+      "size_mb": 42.5
+    },
+    {
+      "name": "vector_db_20260924_180000",
+      "created_at": "2026-09-24T18:00:00",
+      "size_mb": 38.1
+    }
+  ]
+}
+```
+
+---
+
+### 5.6 Restore Vector Database (`POST /api/v1/admin/restore`)
+Restores the ChromaDB vector database from an existing named snapshot archive.
+
+> [!CAUTION]
+> Restoring a backup completely replaces the active vector database. An automatic pre-restore backup of the current database is created before overwriting.
+
+* **Required Role:** `admin`
+* **Query Parameters:**
+  * `backup_name` *(string, required)*: Directory name of the backup to restore (from `/api/v1/admin/backups`).
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/admin/restore?backup_name=vector_db_20260925_220000" \
+     -H "Authorization: Bearer <admin_token>"
+```
+
+**Example Response (HTTP 200):**
+```json
+{
+  "status": "success",
+  "message": "Vector database successfully restored from backup: vector_db_20260925_220000"
+}
+```
+
+---
+
+## 🛡️ 6. Rate Limiting & Protection
+
+The API implements an in-memory sliding-window per-IP rate limiter to safeguard on-premise hardware against brute-force attacks and resource exhaustion:
+
+* **Configuration:** Configured via `RATE_LIMIT_PER_MINUTE` in `.env` (default: `30` requests/minute/IP).
+* **Bypassed Routes:** Documentation endpoints (`/docs`, `/redoc`, `/openapi.json`) are excluded.
+* **HTTP 429 Too Many Requests:** When a client exceeds the limit, the API immediately returns HTTP 429:
+
+```json
+{
+  "detail": "Rate limit exceeded. Maximum 30 requests per minute.",
+  "retry_after": 60
+}
+```
+
+* **Header:** Includes `Retry-After: 60` indicating the number of seconds until the sliding window clears.
+
+---
+
+## 🔒 7. CORS Configuration
 
 CORS origins are configured via the `CORS_ORIGINS` environment variable in `.env`:
 

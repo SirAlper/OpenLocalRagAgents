@@ -1,0 +1,96 @@
+# 🤝 Contributing to OpenLocalRagAgents
+
+Thank you for considering contributing to **OpenLocalRagAgents**! Every contribution matters — whether it's fixing a bug, improving documentation, or proposing a new feature.
+
+---
+
+## 📋 How to Contribute
+
+### 1. Fork & Clone
+```bash
+git clone https://github.com/<your-username>/OpenLocalRagAgents.git
+cd OpenLocalRagAgents
+```
+
+### 2. Create a Feature Branch
+```bash
+git checkout -b feature/your-feature-name
+```
+
+### 3. Set Up Development Environment
+```bash
+python -m venv .venv
+.venv\Scripts\activate  # Linux/macOS: source .venv/bin/activate
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+pip install -r requirements.txt
+```
+
+### 4. Make Your Changes
+- Follow existing code style and conventions
+- Add docstrings to all new functions and classes
+- Update tests if you modify existing behavior
+- Add new tests for new features
+
+### 5. Run Tests & Linting
+```bash
+# Run the test suite:
+pytest tests/ -v
+
+# Check test coverage:
+pytest --cov=src --cov-report=term-missing
+
+# Check code style and linting:
+ruff check .
+```
+Ensure all 52 tests and linting checks pass before submitting.
+
+### 6. Submit a Pull Request
+- Push your branch and open a PR against `main`
+- Provide a clear description of what your changes do
+- Reference any related issues
+
+---
+
+## 🧪 Testing Guidelines
+
+- Unit tests go in `tests/` with the naming convention `test_<module>.py`
+- Use `unittest.mock` for mocking external dependencies (LLM, database, etc.)
+- Aim for meaningful test coverage, not just line coverage
+
+---
+
+## 📐 Code Style
+
+- **Python 3.10+** compatibility
+- Use type hints for function signatures
+- Follow PEP 8 conventions
+- Use descriptive variable and function names
+- Keep functions focused and under 50 lines where practical
+
+---
+
+## 🔒 Security
+
+If you discover a security vulnerability, please **do not** open a public issue. Instead, email the maintainers directly or use GitHub's private vulnerability reporting.
+
+---
+
+## 📜 Code of Conduct
+
+### Our Pledge
+We are committed to providing a welcoming and inclusive experience for everyone, regardless of background, identity, or experience level.
+
+### Our Standards
+- Use welcoming and inclusive language
+- Be respectful of differing viewpoints and experiences
+- Gracefully accept constructive criticism
+- Focus on what is best for the community
+
+### Enforcement
+Instances of unacceptable behavior may be reported to the project maintainers. All complaints will be reviewed and investigated promptly and fairly.
+
+---
+
+## 📄 License
+
+By contributing, you agree that your contributions will be licensed under the [MIT License](LICENSE).

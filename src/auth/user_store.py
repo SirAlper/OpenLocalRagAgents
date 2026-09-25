@@ -38,11 +38,12 @@ class UserStore:
     """
     Thread-safe JSON-backed enterprise user store.
     Handles user CRUD, password hashing, and default admin seeding.
+    Uses RLock to safely support nested locking (e.g., authenticate_user → get_user).
     """
 
     def __init__(self, file_path: str = USERS_FILE_PATH):
         self.file_path = file_path
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._ensure_storage()
 
     def _ensure_storage(self) -> None:
@@ -124,7 +125,13 @@ class UserStore:
             return users
 
     def create_user(self, username: str, password: str, role: UserRole) -> User:
-        """Create a new user with hashed password."""
+        """Create a new user with hashed password after validating password policy."""
+        from src.auth.password_policy import password_policy
+
+        violations = password_policy.validate(password)
+        if violations:
+            raise ValueError(f"Password does not meet policy requirements: {'; '.join(violations)}")
+
         with self._lock:
             data = self._load_data()
             if username in data:

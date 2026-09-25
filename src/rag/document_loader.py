@@ -3,6 +3,7 @@ import re
 from pypdf import PdfReader
 from docx import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from src.core.config import CHUNK_SIZE, CHUNK_OVERLAP
 from src.core.logger import get_logger
 
 logger = get_logger("DocumentLoader")
@@ -13,10 +14,10 @@ class DocumentLoader:
 
     def __init__(self, data_dir: str):
         self.data_dir = data_dir
-        # Retain 100 characters overlap to preserve semantic continuity across chunk borders
+        # Configurable via CHUNK_SIZE and CHUNK_OVERLAP environment variables
         self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=600,
-            chunk_overlap=100,
+            chunk_size=CHUNK_SIZE,
+            chunk_overlap=CHUNK_OVERLAP,
             separators=["\n\n", "\n", ". ", " ", ""]
         )
 
