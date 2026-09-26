@@ -17,10 +17,10 @@ class DocumentRagAgent(BaseSubAgent):
     """Specialist sub-agent for dense vector search and factual grounding over enterprise documents."""
 
     name: str = "doc_agent"
-    display_name: str = "Belge & Politika RAG Ajanı"
+    display_name: str = "Document & Policy RAG Specialist"
     description: str = (
-        "Şirket içi politika, prosedür, yönetmelik, teknik şartname, PDF, DOCX ve metin "
-        "dokümanlarından semantik arama yapmak ve belgelere dayalı doğrulanmış yanıtlar üretmek için kullanılır."
+        "Used for dense semantic retrieval and grounded answer generation across enterprise "
+        "policies, procedures, regulations, technical specifications, PDFs, DOCXs, and text documents."
     )
 
     def __init__(self, chat_model=None, rag_engine: Optional[RAGEngine] = None):

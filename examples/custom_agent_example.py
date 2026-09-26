@@ -1,10 +1,10 @@
 """
-Örnek Özel Alt Ajan (Custom Sub-Agent) Uygulaması.
+Custom Sub-Agent Reference Implementation.
 
-Bu örnek dosya, OpenLocalRagAgents sistemine bağımsız yeni bir ajanın
-nasıl ekleneceğini ve MultiAgentOrchestrator ile nasıl test edileceğini gösterir.
+This sample script demonstrates how to define an independent specialist sub-agent,
+register it with the central AgentRegistry, and execute it within the MultiAgent system.
 
-Çalıştırma:
+Execution:
     python examples/custom_agent_example.py
 """
 import os
@@ -26,16 +26,16 @@ from src.agent.multi_agent.orchestrator_graph import MultiAgentOrchestrator
 
 @register_agent
 class CurrencyConverterAgent(BaseSubAgent):
-    """Kurumsal döviz kurları ve para birimi çevirileri için uzman alt ajan."""
+    """Specialist sub-agent for corporate exchange rates and currency conversions."""
 
     name: str = "currency_agent"
-    display_name: str = "Döviz & Kur Uzmanı"
+    display_name: str = "Currency & Exchange Analyst"
     description: str = (
-        "Döviz kurları, para birimi çevirileri (USD, EUR, GBP, TRY), kur farkı hesaplamaları "
-        "ve kurumsal fatura kurları ile ilgili soruları yanıtlamak için kullanılır."
+        "Used for foreign exchange rates, currency conversions (USD, EUR, GBP, TRY), "
+        "exchange rate variance, and corporate billing currency queries."
     )
 
-    # Örnek sabit kur tablosu (Gerçek senaryoda bir API veya DB'den çekilebilir)
+    # Sample corporate benchmark exchange rates
     RATES_TO_TRY = {
         "usd": 34.50,
         "eur": 37.80,
@@ -46,15 +46,15 @@ class CurrencyConverterAgent(BaseSubAgent):
         start_time = time.time()
         question = state.get("question", "").strip()
 
-        # Basit hesaplama mantığı (demo amaçlı)
+        # Calculation logic (demo purposes)
         reply = (
-            f"💱 **Döviz Çeviri Raporu**\n\n"
-            f"Güncel Kurumsal Gösterge Kurları:\n"
+            f"💱 **Corporate Currency Report**\n\n"
+            f"Current Benchmark Exchange Rates:\n"
             f"- **1 USD:** {self.RATES_TO_TRY['usd']:.2f} TRY\n"
             f"- **1 EUR:** {self.RATES_TO_TRY['eur']:.2f} TRY\n"
             f"- **1 GBP:** {self.RATES_TO_TRY['gbp']:.2f} TRY\n\n"
-            f"Soru: *\"{question}\"*\n"
-            f"Talebiniz kurumsal muhasebe kur tablosuna göre hesaplanmıştır."
+            f"Query: *\"{question}\"*\n"
+            f"Calculation processed against corporate accounting benchmark table."
         )
 
         duration_ms = int((time.time() - start_time) * 1000)
@@ -72,7 +72,7 @@ class CurrencyConverterAgent(BaseSubAgent):
             "sources": [{
                 "source": "Corporate: Central Bank Exchange Rates",
                 "chunk_index": 0,
-                "content": "Günlük kurumsal gösterge döviz kurları tablosu.",
+                "content": "Daily corporate benchmark exchange rate table.",
             }],
             "agent_trace": list(state.get("agent_trace", [])) + [trace_entry],
         }
@@ -80,32 +80,32 @@ class CurrencyConverterAgent(BaseSubAgent):
 
 def main():
     print("=" * 60)
-    print("🤖 Multi-Agent Dinamik Ajan Kayıt Testi")
+    print("🤖 Multi-Agent Dynamic Registration Verification")
     print("=" * 60)
 
-    # 1. Sisteme kayıtlı ajanları listele
-    print("\n📋 Kayıtlı Ajanlar:")
+    # 1. List registered agents in registry
+    print("\n📋 Registered Agents:")
     for name in agent_registry.list_agent_names():
         agent = agent_registry.get(name)
         print(f"  - [{name}] {agent.display_name}")
 
-    # 2. Supervisor İstemini İncele (Yeni ajan otomatik dahil oldu mu?)
-    print("\n👑 Supervisor Yönlendirme Özeti (Dinamik Prompt):")
+    # 2. Inspect dynamic supervisor prompt
+    print("\n👑 Supervisor Routing Prompt Summary:")
     print(agent_registry.get_supervisor_prompt())
 
-    # 3. Ajanı doğrudan test et
-    print("\n⚡ CurrencyConverterAgent Doğrudan Çalıştırılıyor:")
+    # 3. Direct agent execution test
+    print("\n⚡ Executing CurrencyConverterAgent Directly:")
     currency_agent = agent_registry.get("currency_agent")
-    test_state = {"question": "1000 dolar kaç TL yapıyor?", "agent_trace": []}
+    test_state = {"question": "How much is 1000 USD in TRY?", "agent_trace": []}
     result = currency_agent.execute(test_state)
 
-    print("\n--- Ajan Yanıtı ---")
+    print("\n--- Agent Answer ---")
     print(result["final_answer"])
-    print("\n--- Kaynaklar ---")
+    print("\n--- Sources ---")
     print(result["sources"])
-    print("\n--- Denetim İzi (Trace) ---")
+    print("\n--- Execution Trace ---")
     print(result["agent_trace"])
-    print("\n✅ Özel alt ajan başarıyla çalıştı ve entegre oldu!")
+    print("\n✅ Custom sub-agent executed and integrated successfully!")
 
 
 if __name__ == "__main__":

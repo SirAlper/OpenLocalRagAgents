@@ -373,7 +373,7 @@ with st.sidebar:
         st.divider()
 
         # ──── Multi-Agent Team Selection ────
-        st.subheader("🤖 Uzman Ajan Ekibi")
+        st.subheader("🤖 Specialist Agent Team")
         agents_data = fetch_agents_api()
         agent_names = [a["name"] for a in agents_data]
         agent_display_map = {a["name"]: a["display_name"] for a in agents_data}
@@ -383,11 +383,11 @@ with st.sidebar:
         current_index = agent_names.index(current_agent) if current_agent in agent_names else 0
 
         selected_agent = st.selectbox(
-            "Aktif Görev Ajanı:",
+            "Active Specialist Agent:",
             options=agent_names,
             index=current_index,
             format_func=lambda k: agent_display_map.get(k, k),
-            help="Soruya yanıt verecek uzman ajanı seçin. 'Otomatik' modunda Supervisor Agent soruyu anlayıp en uygun uzman ajana veya doğrudan yanıta yönlendirir.",
+            help="Select the specialist agent to handle your query. In 'Auto' mode, the Supervisor Agent automatically classifies intent and delegates to the most appropriate specialist or responds directly.",
         )
         st.session_state.selected_agent = selected_agent
         if selected_agent in agent_desc_map:
@@ -527,16 +527,16 @@ else:
             if msg.get("role") == "assistant" and msg.get("active_agent"):
                 agent_name = msg["active_agent"]
                 if agent_name == "supervisor":
-                    badge_label = "👑 Supervisor (Doğrudan Yanıt)"
+                    badge_label = "👑 Supervisor (Direct Response)"
                     badge_style = "background-color: #fef3c7; color: #92400e; border: 1px solid #fde68a;"
                 elif agent_name == "doc_agent":
-                    badge_label = "📄 doc_agent (Belge RAG Uzmanı)"
+                    badge_label = "📄 doc_agent (Document RAG Specialist)"
                     badge_style = "background-color: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd;"
                 elif agent_name == "db_agent":
-                    badge_label = "🗄️ db_agent (SQL Veritabanı Uzmanı)"
+                    badge_label = "🗄️ db_agent (SQL Database Analyst)"
                     badge_style = "background-color: #f3e8ff; color: #6b21a8; border: 1px solid #e9d5ff;"
                 elif agent_name == "compliance_agent":
-                    badge_label = "🛡️ compliance_agent (Mevzuat & Uyum Denetçisi)"
+                    badge_label = "🛡️ compliance_agent (Compliance Auditor)"
                     badge_style = "background-color: #fee2e2; color: #991b1b; border: 1px solid #fecaca;"
                 else:
                     badge_label = f"🤖 {agent_name}"
@@ -551,7 +551,7 @@ else:
 
             # Render Agent Trace if present
             if msg.get("agent_trace"):
-                with st.expander(f"🔍 Ajan Yürütme İzi ({len(msg['agent_trace'])} Adım)"):
+                with st.expander(f"🔍 Agent Execution Trace ({len(msg['agent_trace'])} Steps)"):
                     for t_idx, step in enumerate(msg["agent_trace"], 1):
                         step_agent = step.get("agent", "agent")
                         step_action = step.get("action", "")
@@ -561,7 +561,7 @@ else:
                         if "query" in step:
                             st.code(step["query"], language="sql")
                         if "search_query" in step:
-                            st.caption(f"Aranan Sorgu: `{step['search_query']}`")
+                            st.caption(f"Search Query: `{step['search_query']}`")
 
             # Audit & Verification Badges
             if msg.get("is_refined") is True:
@@ -605,7 +605,7 @@ else:
         # Query Backend with Thinking Spinner
         with st.chat_message("assistant"):
             selected_agent = st.session_state.get("selected_agent", "auto")
-            with st.spinner("💭 Multi-Agent takımı analiz ediyor ve yanıt hazırlıyor..."):
+            with st.spinner("💭 Multi-Agent team is analyzing and preparing response..."):
                 res = query_rag_api(prompt, agent=selected_agent)
 
             answer = res.get("answer", "No response received.")
@@ -617,16 +617,16 @@ else:
             is_verified = ("evet" in grade or "yes" in grade) or is_refined
 
             if active_agent == "supervisor":
-                badge_label = "👑 Supervisor (Doğrudan Yanıt)"
+                badge_label = "👑 Supervisor (Direct Response)"
                 badge_style = "background-color: #fef3c7; color: #92400e; border: 1px solid #fde68a;"
             elif active_agent == "doc_agent":
-                badge_label = "📄 doc_agent (Belge RAG Uzmanı)"
+                badge_label = "📄 doc_agent (Document RAG Specialist)"
                 badge_style = "background-color: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd;"
             elif active_agent == "db_agent":
-                badge_label = "🗄️ db_agent (SQL Veritabanı Uzmanı)"
+                badge_label = "🗄️ db_agent (SQL Database Analyst)"
                 badge_style = "background-color: #f3e8ff; color: #6b21a8; border: 1px solid #e9d5ff;"
             elif active_agent == "compliance_agent":
-                badge_label = "🛡️ compliance_agent (Mevzuat & Uyum Denetçisi)"
+                badge_label = "🛡️ compliance_agent (Compliance Auditor)"
                 badge_style = "background-color: #fee2e2; color: #991b1b; border: 1px solid #fecaca;"
             else:
                 badge_label = f"🤖 {active_agent}"
@@ -642,7 +642,7 @@ else:
 
             # Render trace
             if agent_trace:
-                with st.expander(f"🔍 Ajan Yürütme İzi ({len(agent_trace)} Adım)"):
+                with st.expander(f"🔍 Agent Execution Trace ({len(agent_trace)} Steps)"):
                     for t_idx, step in enumerate(agent_trace, 1):
                         step_agent = step.get("agent", "agent")
                         step_action = step.get("action", "")
@@ -652,7 +652,7 @@ else:
                         if "query" in step:
                             st.code(step["query"], language="sql")
                         if "search_query" in step:
-                            st.caption(f"Aranan Sorgu: `{step['search_query']}`")
+                            st.caption(f"Search Query: `{step['search_query']}`")
 
             # Audit Badges
             if is_refined:

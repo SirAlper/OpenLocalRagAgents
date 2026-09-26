@@ -11,33 +11,33 @@ from src.core.logger import get_logger
 
 logger = get_logger("MultiAgent.ComplianceAgent")
 
-COMPLIANCE_SYSTEM_PROMPT = """Sen üst düzey bir Kurumsal Uyum, Hukuk ve Bilgi Güvenliği Denetçisisin (Chief Compliance & Information Security Officer).
-Görevin, kullanıcının belirttiği senaryoyu, eylemi, talebi veya sözleşme şartını şirketin resmi politikaları ve mevzuatlarına göre tarafsız bir şekilde denetlemektir.
+COMPLIANCE_SYSTEM_PROMPT = """You are a senior Corporate Compliance, Legal, and Information Security Auditor (Chief Compliance & Information Security Officer).
+Your mission is to objectively audit the user's stated scenario, action, request, or contractual clause against official enterprise policies and regulations.
 
-Aşağıda şirketin bilgi tabanından taranarak bulunan ilgili şirket politikaları, yönetmelikler ve kurallar yer almaktadır:
+Below are the relevant enterprise policies, guidelines, and rules retrieved from the corporate knowledge base:
 --------------------
 {context}
 --------------------
 
-DENETİM VE RAPORLAMA STANDARTLARI:
-Yanıtını MUTLAKA aşağıdaki resmi kurumsal denetim formatında üret:
+AUDIT AND REPORTING STANDARDS:
+You MUST produce your response in the following structured corporate audit format:
 
-### 📌 1. Denetim Kararı (Verdict)
-Aşağıdaki üç kategoriden birini açıkça seç:
-- **[UYGUN - COMPLIANT]**: Talep şirket politikalarına tamamen uygundur.
-- **[RİSKLİ / ŞARTLI UYGUN - WARNING]**: Belirli güvenlik veya idari şartlar/izinler sağlandığında uygulanabilir.
-- **[İHLAL / YASAK - VIOLATION]**: Talep şirket bilgi güvenliği, KVKK veya etik kurallarına aykırıdır, kesinlikle uygulanamaz.
+### 📌 1. Audit Verdict
+Explicitly select one of the following three categories:
+- **[COMPLIANT]**: The request is fully compliant with company policies.
+- **[WARNING / CONDITIONALLY COMPLIANT]**: Permissible only if specific security or administrative prerequisites/approvals are satisfied.
+- **[VIOLATION / PROHIBITED]**: The request violates enterprise information security, data privacy (GDPR/KVKK), or code of conduct rules, and cannot be permitted.
 
-### 📑 2. Dayanak Politika ve Madde Referansları
-Yukarıdaki metinde yer alan doküman adı, politika kodu ve ilgili fıkraları belirt (Örn: SEC-POL-04 Madde 4.1).
+### 📑 2. Underlying Policy & Clause References
+Specify the document name, policy code, and relevant sections from the context above (e.g., SEC-POL-04 Section 4.1).
 
-### 🔍 3. Risk ve Etki Değerlendirmesi
-Talebin şirkete getireceği güvenlik, yasal, idari veya cezai riskleri analiz et.
+### 🔍 3. Risk & Impact Assessment
+Analyze the security, legal, administrative, or operational risks the action poses to the enterprise.
 
-### 💡 4. Zorunlu Onaylar ve Aksiyon Planı
-Bu eylemin gerçekleştirilebilmesi için gereken idari onaylar (BT Direktörü, DPO, İK vb.) veya izlenmesi gereken doğru prosedür adımları.
+### 💡 4. Mandatory Approvals & Action Plan
+Required administrative approvals (CISO, DPO, HR, Legal) or proper procedure steps to execute this request safely.
 
-Eğer şirket belgelerinde bu konuyla ilgili hiçbir kural bulunmuyorsa, şirketin bu konuda özel bir yazılı kuralı olmadığını ve ilgili departmandan (BT/Hukuk) görüş alınması gerektiğini belirt.
+If no specific rule is found in company documents, state that no written policy was identified and recommend consulting the Legal or Information Security team.
 """
 
 
@@ -46,11 +46,11 @@ class ComplianceAuditorAgent(BaseSubAgent):
     """Specialist sub-agent for auditing enterprise actions against compliance policies and producing structured verdicts."""
 
     name: str = "compliance_agent"
-    display_name: str = "Kurumsal Uyum & Politika Denetçisi"
+    display_name: str = "Enterprise Compliance Auditor"
     description: str = (
-        "Kullanıcının sorduğu durumları, eylemleri, süreçleri veya talepleri şirket güvenlik politikaları, "
-        "KVKK/GDPR, İK yönetmeliği ve kurumsal kurallara göre resmi olarak denetleyip [UYGUN / RİSKLİ / İHLAL] "
-        "denetim raporu üretmek için kullanılır."
+        "Used for officially auditing user scenarios, processes, or requests against enterprise security policies, "
+        "privacy regulations (GDPR/KVKK), and HR rules, producing structured compliance audit reports "
+        "[COMPLIANT / WARNING / VIOLATION]."
     )
 
     def __init__(self, chat_model=None, rag_engine: Optional[RAGEngine] = None):
@@ -79,9 +79,9 @@ class ComplianceAuditorAgent(BaseSubAgent):
         if not context:
             duration_ms = int((time.time() - start_time) * 1000)
             answer = (
-                "### 📌 1. Denetim Kararı\n**[DEĞERLENDİRİLEMEDİ]**\n\n"
-                "### 📑 2. Dayanak Belgeler\nŞirket bilgi tabanında bu konuyla doğrudan eşleşen bir politika veya yönetmelik belgesi bulunamadı.\n\n"
-                "### 🔍 3. Tavsiye\nLütfen ilgili talep için Hukuk ve Uyum veya Bilgi Güvenliği birimiyle doğrudan iletişime geçiniz."
+                "### 📌 1. Audit Verdict\n**[UNDETERMINED]**\n\n"
+                "### 📑 2. Supporting Documents\nNo relevant policy or regulatory document was found matching this inquiry in the knowledge base.\n\n"
+                "### 🔍 3. Recommendation\nPlease contact the Legal & Compliance or Information Security department directly for guidance."
             )
             return {
                 "final_answer": answer,
@@ -103,12 +103,12 @@ class ComplianceAuditorAgent(BaseSubAgent):
         try:
             response = self.chat_model.invoke([
                 SystemMessage(content=prompt),
-                HumanMessage(content=f"Denetlenecek Durum / Talep: {question}"),
+                HumanMessage(content=f"Scenario / Request to Audit: {question}"),
             ])
             audit_report = response.content.strip()
         except Exception as e:
             logger.error(f"[{self.name}] Compliance audit LLM error: {e}")
-            audit_report = f"Denetim raporu hazırlanırken sistemsel bir hata oluştu: {e}"
+            audit_report = f"A system error occurred while generating the audit report: {e}"
 
         duration_ms = int((time.time() - start_time) * 1000)
         trace_entry = {

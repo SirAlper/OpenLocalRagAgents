@@ -11,27 +11,27 @@ from src.core.logger import get_logger
 
 logger = get_logger("MultiAgent.Supervisor")
 
-SUPERVISOR_SYSTEM_PROMPT = """Sen kurumsal bir Yapay Zeka Orkestratörü ve Baş Ajanısın (Enterprise AI Supervisor Orchestrator).
-Görevin, kullanıcının sorusunu analiz ederek en doğru uzman alt ajana yönlendirmek veya soru genel bir sohbet ise doğrudan yanıtlamaktır.
+SUPERVISOR_SYSTEM_PROMPT = """You are an Enterprise AI Supervisor Orchestrator.
+Your task is to analyze the user's inquiry and route it to the most qualified specialist sub-agent, or answer directly if the inquiry is a general greeting or meta-question.
 
-SİSTEMDE KAYITLI UZMAN AJANLAR:
+REGISTERED SPECIALIST SUB-AGENTS:
 {agent_descriptions}
 
-YÖNLENDİRME VE KARAR KURALLARI:
-1. Soru yukarıdaki uzman ajanlardan birinin alanına giriyorsa, ilgili ajanın adını ('agent' alanında) seç.
-   - Şirket politikaları, prosedürler, PDF'ler, yönergeler -> doc_agent
-   - Veritabanı tabloları, satış rakamları, ürün/stok bilgisi, operasyonel SQL verisi -> db_agent
-   - Bir eylemin/talebin/durumun şirket kurallarına ve KVKK/güvenliğe uygunluk denetimi -> compliance_agent
-   - (Varsa diğer özel ajanlar)
-2. Soru genel bir selamlama (örn: "merhaba", "selam", "nasılsın"), sistemin ne işe yaradığını/yeteneklerini sorma veya genel bir bilgi ise, 'agent': 'finish' seç ve 'direct_response' alanında doğrudan nazik ve profesyonel bir cevap ver.
+ROUTING AND DECISION RULES:
+1. If the question matches the domain of one of the registered specialist agents above, select that agent's exact name in the 'agent' field:
+   - Company policies, procedures, PDFs, guidelines, text documents -> doc_agent
+   - Relational database tables, metrics, inventory, orders, SQL data -> db_agent
+   - Verification of actions against rules, compliance, GDPR/KVKK, or ethics -> compliance_agent
+   - (Or any other custom specialist agent listed above)
+2. If the user inquiry is a conversational greeting (e.g., "hello", "hi", "how are you"), asks what the system can do, or is general chatter, choose 'agent': 'finish' and provide a polite, professional response in 'direct_response'.
 
-ÇIKTI FORMATI:
-Yanıtını MUTLAKA aşağıdaki JSON formatında üret, başka hiçbir metin ekleme:
+OUTPUT FORMAT:
+You MUST output your decision strictly in JSON format with no additional text or explanations:
 ```json
 {{
-  "agent": "<seçilen_ajan_adı veya 'finish'>",
-  "reason": "<kısa yönlendirme gerekçesi>",
-  "direct_response": "<yalnızca agent 'finish' ise verilecek doğrudan cevap, aksi halde boş string>"
+  "agent": "<selected_agent_name or 'finish'>",
+  "reason": "<brief rationale for routing>",
+  "direct_response": "<direct response if agent is 'finish', otherwise empty string>"
 }}
 ```
 """
@@ -67,20 +67,21 @@ class SupervisorAgent:
         greeting_words = {
             "merhaba", "selam", "selamlar", "günaydın", "gunaydin",
             "iyi günler", "iyi gunler", "iyi akşamlar", "iyi aksamlar",
-            "nasılsın", "nasilsin", "hello", "hi", "hey"
+            "nasılsın", "nasilsin", "hello", "hi", "hey", "good morning",
+            "good afternoon", "how are you", "greetings"
         }
         words = clean_q.split()
         is_greeting = (clean_q in greeting_words) or (
-            len(words) <= 4
+            len(words) <= 5
             and any(w in greeting_words for w in words)
-            and not any(kw in clean_q for kw in ("sql", "select", "tablo", "doküman", "dokuman", "belge", "rapor", "mevzuat", "kvkk", "politika"))
+            and not any(kw in clean_q for kw in ("sql", "select", "table", "tablo", "document", "doküman", "belge", "report", "compliance", "policy", "kvkk", "gdpr"))
         )
         if is_greeting:
             duration_ms = int((time.time() - start_time) * 1000)
             direct_reply = (
-                "Merhaba! Ben kurumsal yapay zeka asistanınızım. "
-                "Şirket dokümanları (PDF/DOCX), SQL veritabanı tabloları ve kurumsal uyum/güvenlik "
-                "denetimleri konularında uzman ajanlarımla size yardımcı olmaya hazırım. Nasıl yardımcı olabilirim?"
+                "Hello! I am your Enterprise AI Assistant. "
+                "I am equipped with specialist agents covering enterprise documents (PDF/DOCX), "
+                "SQL database analysis, and corporate compliance auditing. How can I assist you today?"
             )
             return {
                 "next_agent": "finish",
@@ -137,7 +138,7 @@ class SupervisorAgent:
         if chosen_agent == "finish":
             return {
                 "next_agent": "finish",
-                "final_answer": direct_response or "Sorunuza yanıt üretildi.",
+                "final_answer": direct_response or "Response generated for your inquiry.",
                 "sources": [],
                 "agent_trace": list(state.get("agent_trace", [])) + [trace_entry],
             }
@@ -157,12 +158,12 @@ class SupervisorAgent:
         q = question.lower()
 
         # Database keywords
-        if any(w in q for w in ("tablo", "sql", "satış", "ürün", "stok", "fiyat", "sipariş", "kaç adet", "ciro", "kayıt")):
-            return "db_agent", "Veritabanı ve tablosal veri anahtar kelimeleri tespit edildi.", ""
+        if any(w in q for w in ("tablo", "table", "sql", "satış", "sales", "ürün", "product", "stock", "stok", "price", "fiyat", "order", "sipariş", "count", "record")):
+            return "db_agent", "Database and tabular query keywords detected.", ""
 
         # Compliance keywords
-        if any(w in q for w in ("uygun mu", "yasak mı", "izin", "ihlal", "kvkk", "ceza", "güvenlik kuralı", "kural ihlali")):
-            return "compliance_agent", "Uyum, kural ve denetim anahtar kelimeleri tespit edildi.", ""
+        if any(w in q for w in ("uygun mu", "compliant", "allowed", "prohibited", "yasak mı", "permission", "izin", "violation", "ihlal", "kvkk", "gdpr", "penalty", "policy")):
+            return "compliance_agent", "Compliance, policy, and audit keywords detected.", ""
 
         # Default document RAG
-        return "doc_agent", "Varsayılan kurumsal doküman araması seçildi.", ""
+        return "doc_agent", "Default enterprise document retrieval selected.", ""
