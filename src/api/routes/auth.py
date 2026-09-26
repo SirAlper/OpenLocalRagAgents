@@ -1,3 +1,8 @@
+"""Authentication and Access Control API Routes.
+
+Exposes endpoints for user authentication (JWT), token refresh,
+profile retrieval, and administrative user management with compliance audit logging.
+"""
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
@@ -22,13 +27,11 @@ router = APIRouter(prefix="/api/v1/auth", tags=["Authentication & Access Control
 
 @router.post("/login", response_model=TokenResponse)
 async def login(credentials: LoginRequest, http_req: Request):
-    """
-    Authenticate with username and password to obtain JWT access and refresh tokens.
-    """
+    """Authenticate with username and password to obtain JWT access and refresh tokens."""
     ip_addr = http_req.client.host if http_req.client else None
     user = user_store.authenticate_user(credentials.username, credentials.password)
     if not user:
-        audit_logger.log(
+        await audit_logger.alog(
             username=credentials.username,
             role="unknown",
             action="login",
@@ -44,7 +47,7 @@ async def login(credentials: LoginRequest, http_req: Request):
 
     access_token, expires_in = create_access_token(user.username, user.role)
     refresh_token, _ = create_refresh_token(user.username, user.role)
-    audit_logger.log(
+    await audit_logger.alog(
         username=user.username,
         role=user.role,
         action="login",
@@ -65,9 +68,7 @@ async def login(credentials: LoginRequest, http_req: Request):
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(request: RefreshRequest, http_req: Request):
-    """
-    Exchange a valid refresh token for a new access token without re-authentication.
-    """
+    """Exchange a valid refresh token for a new access token without re-authentication."""
     ip_addr = http_req.client.host if http_req.client else None
     token_data = decode_refresh_token(request.refresh_token)
     if token_data is None:
@@ -77,7 +78,6 @@ async def refresh_token(request: RefreshRequest, http_req: Request):
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Verify user still exists and is active
     user = user_store.get_user(token_data.username)
     if user is None or user.disabled:
         raise HTTPException(
@@ -88,7 +88,7 @@ async def refresh_token(request: RefreshRequest, http_req: Request):
     access_token, expires_in = create_access_token(user.username, user.role)
     new_refresh_token, _ = create_refresh_token(user.username, user.role)
 
-    audit_logger.log(
+    await audit_logger.alog(
         username=user.username,
         role=user.role,
         action="token_refresh",
@@ -109,9 +109,7 @@ async def refresh_token(request: RefreshRequest, http_req: Request):
 
 @router.get("/me", response_model=UserResponse)
 async def get_my_profile(current_user: User = Depends(get_current_user)):
-    """
-    Get profile information of currently authenticated user.
-    """
+    """Get profile information of currently authenticated user."""
     return UserResponse(
         username=current_user.username,
         role=current_user.role,
@@ -125,16 +123,14 @@ async def register_user(
     new_user_data: UserCreate,
     current_admin: User = Depends(require_role("admin")),
 ):
-    """
-    Register a new user (Admin only). Password must meet configured policy requirements.
-    """
+    """Register a new user (Admin only). Password must meet configured policy requirements."""
     try:
         created = user_store.create_user(
             username=new_user_data.username,
             password=new_user_data.password,
             role=new_user_data.role,
         )
-        audit_logger.log(
+        await audit_logger.alog(
             username=current_admin.username,
             role=current_admin.role,
             action="register_user",
@@ -148,7 +144,7 @@ async def register_user(
             created_at=created.created_at,
         )
     except ValueError as e:
-        audit_logger.log(
+        await audit_logger.alog(
             username=current_admin.username,
             role=current_admin.role,
             action="register_user",
@@ -160,9 +156,7 @@ async def register_user(
 
 @router.get("/users", response_model=List[UserResponse])
 async def list_all_users(_: User = Depends(require_role("admin"))):
-    """
-    List all registered users (Admin only).
-    """
+    """List all registered users (Admin only)."""
     return user_store.list_users()
 
 
@@ -172,9 +166,7 @@ async def update_user(
     update_data: UserUpdate,
     current_admin: User = Depends(require_role("admin")),
 ):
-    """
-    Update user status, role, or reset password (Admin only).
-    """
+    """Update user status, role, or reset password (Admin only)."""
     updated = user_store.update_user(
         username=username,
         password=update_data.password,
@@ -186,7 +178,7 @@ async def update_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"User '{username}' not found.",
         )
-    audit_logger.log(
+    await audit_logger.alog(
         username=current_admin.username,
         role=current_admin.role,
         action="update_user",
@@ -206,9 +198,7 @@ async def delete_user(
     username: str,
     current_admin: User = Depends(require_role("admin")),
 ):
-    """
-    Delete a user account (Admin only).
-    """
+    """Delete a user account (Admin only)."""
     try:
         success = user_store.delete_user(username)
         if not success:
@@ -216,7 +206,7 @@ async def delete_user(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"User '{username}' not found.",
             )
-        audit_logger.log(
+        await audit_logger.alog(
             username=current_admin.username,
             role=current_admin.role,
             action="delete_user",
@@ -225,7 +215,7 @@ async def delete_user(
         )
         return {"status": "success", "message": f"User '{username}' deleted."}
     except ValueError as e:
-        audit_logger.log(
+        await audit_logger.alog(
             username=current_admin.username,
             role=current_admin.role,
             action="delete_user",

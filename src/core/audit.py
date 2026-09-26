@@ -113,6 +113,33 @@ class AuditLogger:
                 logger.error(f"Failed to write audit log: {e}")
                 return -1
 
+    async def alog(
+        self,
+        username: str,
+        role: str,
+        action: str,
+        detail: Optional[str] = None,
+        sources: Optional[List[Any]] = None,
+        answer_preview: Optional[str] = None,
+        ip_address: Optional[str] = None,
+        duration_ms: Optional[int] = None,
+        status: str = "success",
+    ) -> int:
+        """Asynchronously record an audit log without blocking the asyncio event loop."""
+        import asyncio
+        return await asyncio.to_thread(
+            self.log,
+            username=username,
+            role=role,
+            action=action,
+            detail=detail,
+            sources=sources,
+            answer_preview=answer_preview,
+            ip_address=ip_address,
+            duration_ms=duration_ms,
+            status=status,
+        )
+
     def query_logs(
         self,
         username: Optional[str] = None,
@@ -195,6 +222,44 @@ class AuditLogger:
             with self._get_connection() as conn:
                 cursor = conn.execute(query_sql, params)
                 return cursor.fetchone()[0]
+
+    async def aquery_logs(
+        self,
+        username: Optional[str] = None,
+        action: Optional[str] = None,
+        status: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """Asynchronously query audit trail records."""
+        import asyncio
+        return await asyncio.to_thread(
+            self.query_logs,
+            username=username,
+            action=action,
+            status=status,
+            start_date=start_date,
+            end_date=end_date,
+            limit=limit,
+            offset=offset,
+        )
+
+    async def acount_logs(
+        self,
+        username: Optional[str] = None,
+        action: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> int:
+        """Asynchronously count audit trail records."""
+        import asyncio
+        return await asyncio.to_thread(
+            self.count_logs,
+            username=username,
+            action=action,
+            status=status,
+        )
 
 
 # Singleton instance
