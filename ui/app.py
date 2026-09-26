@@ -52,6 +52,14 @@ st.markdown("""
     .role-admin { background-color: #dc3545; color: white; }
     .role-editor { background-color: #0d6efd; color: white; }
     .role-viewer { background-color: #198754; color: white; }
+    .agent-badge {
+        display: inline-block;
+        padding: 3px 10px;
+        border-radius: 12px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        margin-bottom: 6px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -224,20 +232,58 @@ def sync_table_api(table_name):
         return False, str(e)
 
 
-def query_rag_api(question):
+def fetch_agents_api():
+    try:
+        res = requests.get(f"{API_BASE_URL}/api/v1/agents", headers=get_auth_headers(), timeout=5)
+        if res.status_code == 200:
+            return res.json().get("agents", [])
+    except Exception:
+        pass
+    return [
+        {
+            "name": "auto",
+            "display_name": "👑 Otomatik (Supervisor Orchestrator)",
+            "description": "Soruyu otomatik analiz edip en uygun uzman ajana veya doğrudan genel yanıta yönlendirir.",
+            "version": "2.0.0",
+        },
+        {
+            "name": "doc_agent",
+            "display_name": "📄 Belge & Politika RAG Ajanı",
+            "description": "Şirket içi dokümanlardan semantik arama ve doğrulanmış yanıt üretimi.",
+            "version": "1.0.0",
+        },
+        {
+            "name": "db_agent",
+            "display_name": "🗄️ SQL Veritabanı Uzmanı",
+            "description": "SQL sorguları ve salt-okunur veritabanı analitiği.",
+            "version": "1.0.0",
+        },
+        {
+            "name": "compliance_agent",
+            "display_name": "🛡️ Mevzuat & Uyum Denetçisi",
+            "description": "Kurumsal politika, KVKK ve mevzuat uygunluk denetimi.",
+            "version": "1.0.0",
+        },
+    ]
+
+
+def query_rag_api(question, agent=None):
     try:
         session_id = st.session_state.get("session_id")
+        payload = {"question": question, "session_id": session_id}
+        if agent and agent not in ("auto", "none"):
+            payload["agent"] = agent
         res = requests.post(
             f"{API_BASE_URL}/api/v1/query",
             headers=get_auth_headers(),
-            json={"question": question, "session_id": session_id},
+            json=payload,
             timeout=180,
         )
         if res.status_code == 200:
             return res.json()
         elif res.status_code == 401:
             if refresh_token_api():
-                return query_rag_api(question)
+                return query_rag_api(question, agent=agent)
             return {"status": "error", "answer": "Session expired. Please log in again.", "sources": []}
         return {"status": "error", "answer": f"Error: {res.text}", "sources": []}
     except Exception as e:
@@ -262,12 +308,16 @@ def submit_feedback_api(question, feedback, comment=""):
 if "session_id" not in st.session_state:
     st.session_state.session_id = uuid.uuid4().hex[:12]
 
+if "selected_agent" not in st.session_state:
+    st.session_state.selected_agent = "auto"
+
 if "messages" not in st.session_state:
     st.session_state.messages = [
         {
             "role": "assistant",
-            "content": "Hello! I am your enterprise local AI assistant. I can answer questions grounded strictly in your internal documents and connected databases.",
-            "sources": []
+            "content": "Hello! I am your enterprise local AI assistant. I can answer questions grounded strictly in your internal documents, SQL databases, and corporate compliance regulations.",
+            "sources": [],
+            "active_agent": "supervisor",
         }
     ]
 
@@ -319,6 +369,29 @@ with st.sidebar:
         else:
             st.error("🔴 API Offline or Session Expired")
             st.info("Start backend: `uvicorn src.api.main:app --reload`")
+
+        st.divider()
+
+        # ──── Multi-Agent Team Selection ────
+        st.subheader("🤖 Uzman Ajan Ekibi")
+        agents_data = fetch_agents_api()
+        agent_names = [a["name"] for a in agents_data]
+        agent_display_map = {a["name"]: a["display_name"] for a in agents_data}
+        agent_desc_map = {a["name"]: a.get("description", "") for a in agents_data}
+
+        current_agent = st.session_state.get("selected_agent", "auto")
+        current_index = agent_names.index(current_agent) if current_agent in agent_names else 0
+
+        selected_agent = st.selectbox(
+            "Aktif Görev Ajanı:",
+            options=agent_names,
+            index=current_index,
+            format_func=lambda k: agent_display_map.get(k, k),
+            help="Soruya yanıt verecek uzman ajanı seçin. 'Otomatik' modunda Supervisor Agent soruyu anlayıp en uygun uzman ajana veya doğrudan yanıta yönlendirir.",
+        )
+        st.session_state.selected_agent = selected_agent
+        if selected_agent in agent_desc_map:
+            st.caption(f"💡 *{agent_desc_map[selected_agent]}*")
 
         st.divider()
 
@@ -451,7 +524,44 @@ else:
     # Render Message History
     for msg_idx, msg in enumerate(st.session_state.messages):
         with st.chat_message(msg["role"]):
+            if msg.get("role") == "assistant" and msg.get("active_agent"):
+                agent_name = msg["active_agent"]
+                if agent_name == "supervisor":
+                    badge_label = "👑 Supervisor (Doğrudan Yanıt)"
+                    badge_style = "background-color: #fef3c7; color: #92400e; border: 1px solid #fde68a;"
+                elif agent_name == "doc_agent":
+                    badge_label = "📄 doc_agent (Belge RAG Uzmanı)"
+                    badge_style = "background-color: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd;"
+                elif agent_name == "db_agent":
+                    badge_label = "🗄️ db_agent (SQL Veritabanı Uzmanı)"
+                    badge_style = "background-color: #f3e8ff; color: #6b21a8; border: 1px solid #e9d5ff;"
+                elif agent_name == "compliance_agent":
+                    badge_label = "🛡️ compliance_agent (Mevzuat & Uyum Denetçisi)"
+                    badge_style = "background-color: #fee2e2; color: #991b1b; border: 1px solid #fecaca;"
+                else:
+                    badge_label = f"🤖 {agent_name}"
+                    badge_style = "background-color: #f1f5f9; color: #334155; border: 1px solid #cbd5e1;"
+
+                st.markdown(
+                    f'<span class="agent-badge" style="{badge_style}">{badge_label}</span>',
+                    unsafe_allow_html=True,
+                )
+
             st.markdown(msg["content"])
+
+            # Render Agent Trace if present
+            if msg.get("agent_trace"):
+                with st.expander(f"🔍 Ajan Yürütme İzi ({len(msg['agent_trace'])} Adım)"):
+                    for t_idx, step in enumerate(msg["agent_trace"], 1):
+                        step_agent = step.get("agent", "agent")
+                        step_action = step.get("action", "")
+                        step_duration = step.get("duration_ms", 0)
+                        step_status = step.get("status", "done")
+                        st.markdown(f"**{t_idx}. ⚙️ `{step_agent}`** — *{step_action}* (`{step_status}`, `{step_duration}ms`)")
+                        if "query" in step:
+                            st.code(step["query"], language="sql")
+                        if "search_query" in step:
+                            st.caption(f"Aranan Sorgu: `{step['search_query']}`")
 
             # Audit & Verification Badges
             if msg.get("is_refined") is True:
@@ -486,7 +596,7 @@ else:
                         st.write("")
 
     # User Input
-    if prompt := st.chat_input("Ask a question about your enterprise documents (e.g., 'What is our annual leave policy?')..."):
+    if prompt := st.chat_input("Ask a question about your enterprise documents, database, or compliance..."):
         # Append user message
         st.session_state.messages.append({"role": "user", "content": prompt, "sources": []})
         with st.chat_message("user"):
@@ -494,17 +604,55 @@ else:
 
         # Query Backend with Thinking Spinner
         with st.chat_message("assistant"):
-            with st.spinner("💭 Thinking and reviewing enterprise documents..."):
-                res = query_rag_api(prompt)
+            selected_agent = st.session_state.get("selected_agent", "auto")
+            with st.spinner("💭 Multi-Agent takımı analiz ediyor ve yanıt hazırlıyor..."):
+                res = query_rag_api(prompt, agent=selected_agent)
 
             answer = res.get("answer", "No response received.")
             sources = res.get("sources", [])
+            active_agent = res.get("active_agent", "supervisor")
+            agent_trace = res.get("agent_trace", [])
             is_refined = res.get("is_refined", False)
             grade = str(res.get("hallucination_grade", "")).strip().lower()
             is_verified = ("evet" in grade or "yes" in grade) or is_refined
 
+            if active_agent == "supervisor":
+                badge_label = "👑 Supervisor (Doğrudan Yanıt)"
+                badge_style = "background-color: #fef3c7; color: #92400e; border: 1px solid #fde68a;"
+            elif active_agent == "doc_agent":
+                badge_label = "📄 doc_agent (Belge RAG Uzmanı)"
+                badge_style = "background-color: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd;"
+            elif active_agent == "db_agent":
+                badge_label = "🗄️ db_agent (SQL Veritabanı Uzmanı)"
+                badge_style = "background-color: #f3e8ff; color: #6b21a8; border: 1px solid #e9d5ff;"
+            elif active_agent == "compliance_agent":
+                badge_label = "🛡️ compliance_agent (Mevzuat & Uyum Denetçisi)"
+                badge_style = "background-color: #fee2e2; color: #991b1b; border: 1px solid #fecaca;"
+            else:
+                badge_label = f"🤖 {active_agent}"
+                badge_style = "background-color: #f1f5f9; color: #334155; border: 1px solid #cbd5e1;"
+
+            st.markdown(
+                f'<span class="agent-badge" style="{badge_style}">{badge_label}</span>',
+                unsafe_allow_html=True,
+            )
+
             # Render complete answer
             st.markdown(answer)
+
+            # Render trace
+            if agent_trace:
+                with st.expander(f"🔍 Ajan Yürütme İzi ({len(agent_trace)} Adım)"):
+                    for t_idx, step in enumerate(agent_trace, 1):
+                        step_agent = step.get("agent", "agent")
+                        step_action = step.get("action", "")
+                        step_duration = step.get("duration_ms", 0)
+                        step_status = step.get("status", "done")
+                        st.markdown(f"**{t_idx}. ⚙️ `{step_agent}`** — *{step_action}* (`{step_status}`, `{step_duration}ms`)")
+                        if "query" in step:
+                            st.code(step["query"], language="sql")
+                        if "search_query" in step:
+                            st.caption(f"Aranan Sorgu: `{step['search_query']}`")
 
             # Audit Badges
             if is_refined:
@@ -530,5 +678,8 @@ else:
                 "content": answer,
                 "sources": sources,
                 "verified": is_verified,
-                "is_refined": is_refined
+                "is_refined": is_refined,
+                "active_agent": active_agent,
+                "agent_trace": agent_trace,
             })
+

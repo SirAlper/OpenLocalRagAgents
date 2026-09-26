@@ -2,7 +2,7 @@ import os
 import asyncio
 import shutil
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Any
 
 from src.rag.document_loader import DocumentLoader
 from src.rag.rag_engine import RAGEngine
@@ -25,6 +25,7 @@ logger = get_logger("API.State")
 # Lazy initialized singletons
 rag_engine: Optional[RAGEngine] = None
 agent: Optional[EnterpriseRAGAgent] = None
+multi_agent_orchestrator: Optional[Any] = None
 document_loader: Optional[DocumentLoader] = None
 db_connector: Optional[DatabaseConnector] = None
 db_loader: Optional[DatabaseTableLoader] = None
@@ -67,6 +68,15 @@ def get_agent() -> EnterpriseRAGAgent:
     if agent is None:
         agent = EnterpriseRAGAgent(get_rag_engine())
     return agent
+
+
+def get_multi_agent_orchestrator():
+    global multi_agent_orchestrator, agent
+    if multi_agent_orchestrator is None:
+        from src.agent.multi_agent.orchestrator_graph import MultiAgentOrchestrator
+        shared_model = agent.chat_model if agent is not None else None
+        multi_agent_orchestrator = MultiAgentOrchestrator(chat_model=shared_model)
+    return multi_agent_orchestrator
 
 
 def get_document_loader() -> DocumentLoader:
@@ -149,8 +159,15 @@ def init_services():
 
 def cleanup_services():
     """Gracefully release all resources on application shutdown."""
-    global agent, db_connector
+    global agent, db_connector, multi_agent_orchestrator
     logger.info("Cleaning up Enterprise RAG services...")
+
+    if multi_agent_orchestrator is not None:
+        try:
+            multi_agent_orchestrator.cleanup()
+            logger.info("Multi-agent orchestrator resources released.")
+        except Exception as e:
+            logger.warning(f"Error cleaning up multi-agent orchestrator: {e}")
 
     if agent is not None:
         agent.cleanup()
