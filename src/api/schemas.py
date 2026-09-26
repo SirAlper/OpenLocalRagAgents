@@ -10,6 +10,22 @@ class QueryRequest(BaseModel):
         pattern=r"^[a-zA-Z0-9_-]+$",
         description="Alphanumeric session ID for conversation memory",
     )
+    agent: Optional[str] = Field(
+        None,
+        max_length=64,
+        description="Optional forced sub-agent name ('auto' or specific registered agent e.g. 'doc_agent', 'db_agent', 'compliance_agent')",
+    )
+
+
+class AgentInfo(BaseModel):
+    name: str
+    display_name: str
+    description: str
+    version: str = "1.0.0"
+
+
+class AgentsListResponse(BaseModel):
+    agents: List[AgentInfo]
 
 
 class SyncTableRequest(BaseModel):

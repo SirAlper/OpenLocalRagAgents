@@ -6,8 +6,9 @@ import threading
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from src.api.schemas import QueryRequest
-from src.api.state import get_agent, query_concurrency_gate
+from src.api.schemas import QueryRequest, AgentsListResponse, AgentInfo
+from src.api.state import get_agent, get_multi_agent_orchestrator, query_concurrency_gate
+from src.agent.multi_agent.registry import agent_registry
 from src.auth.dependencies import require_role
 from src.auth.models import User
 from src.core.audit import audit_logger
@@ -17,32 +18,65 @@ logger = get_logger("API.Query")
 router = APIRouter(tags=["AI Query"])
 
 
+@router.get("/api/v1/agents", summary="List Available Multi-Agent Specialists", response_model=AgentsListResponse)
+async def list_available_agents(
+    current_user: User = Depends(require_role("admin", "editor", "viewer")),
+):
+    """Return all registered specialist sub-agents available for query delegation."""
+    agents = [
+        AgentInfo(
+            name="auto",
+            display_name="👑 Otomatik (Supervisor Orchestrator)",
+            description="Soruyu otomatik analiz edip en uygun uzman ajana veya doğrudan genel yanıta yönlendirir.",
+            version="2.0.0",
+        )
+    ]
+    for sub_agent in agent_registry.list_agents():
+        info = sub_agent.get_info()
+        agents.append(
+            AgentInfo(
+                name=info["name"],
+                display_name=info["display_name"],
+                description=info["description"],
+                version=info.get("version", "1.0.0"),
+            )
+        )
+    return {"agents": agents}
+
+
 @router.post("/api/v1/query", summary="Query Enterprise AI Assistant")
 async def query_rag(
     request: QueryRequest,
     http_req: Request,
     current_user: User = Depends(require_role("admin", "editor", "viewer")),
 ):
-    """Execute LangGraph workflow and return verified answer, reference sources, and audit status."""
+    """Execute Multi-Agent LangGraph workflow and return verified answer, reference sources, and audit status."""
     start_time = time.time()
     ip_addr = http_req.client.host if http_req.client else None
     try:
         thread_id = f"{current_user.username}_{request.session_id}" if request.session_id else None
+        forced_agent = request.agent if (request.agent and request.agent not in ("auto", "none")) else None
         logger.info(
-            f"Received question from '{current_user.username}' (role: {current_user.role}, thread: {thread_id}): {request.question}"
+            f"Received question from '{current_user.username}' (role: {current_user.role}, thread: {thread_id}, agent: {forced_agent or 'auto'}): {request.question}"
         )
-        current_agent = get_agent()
+        orchestrator = get_multi_agent_orchestrator()
         async with query_concurrency_gate:
-            result = await asyncio.to_thread(current_agent.query, request.question, thread_id=thread_id)
+            result = await asyncio.to_thread(
+                orchestrator.query,
+                request.question,
+                thread_id=thread_id,
+                forced_agent=forced_agent,
+            )
 
         duration_ms = int((time.time() - start_time) * 1000)
         source_names = [s.get("source") for s in result.get("sources", []) if s.get("source")]
+        active_agent = result.get("active_agent", "supervisor")
 
         audit_logger.log(
             username=current_user.username,
             role=current_user.role,
             action="query",
-            detail=request.question,
+            detail=f"[{active_agent}] {request.question}",
             sources=source_names,
             answer_preview=result.get("answer", ""),
             ip_address=ip_addr,
@@ -54,8 +88,10 @@ async def query_rag(
             "status": "success",
             "answer": result["answer"],
             "sources": result["sources"],
+            "active_agent": active_agent,
+            "agent_trace": result.get("agent_trace", []),
             "hallucination_grade": result.get("hallucination_grade", ""),
-            "is_refined": result.get("is_refined", False)
+            "is_refined": result.get("is_refined", False),
         }
     except Exception as e:
         duration_ms = int((time.time() - start_time) * 1000)
@@ -78,22 +114,23 @@ async def query_rag_stream(
     http_req: Request,
     current_user: User = Depends(require_role("admin", "editor", "viewer")),
 ):
-    """Stream LangGraph stage events and deliver final answer via NDJSON format.
+    """Stream Multi-Agent LangGraph stage events and deliver final answer via NDJSON format.
     All streamed queries are recorded in the compliance audit trail."""
     start_time = time.time()
     ip_addr = http_req.client.host if http_req.client else None
 
     try:
         thread_id = f"{current_user.username}_{request.session_id}" if request.session_id else None
+        forced_agent = request.agent if (request.agent and request.agent not in ("auto", "none")) else None
         logger.info(
-            f"Received streaming question from '{current_user.username}' (thread: {thread_id}): {request.question}"
+            f"Received streaming question from '{current_user.username}' (thread: {thread_id}, agent: {forced_agent or 'auto'}): {request.question}"
         )
-        current_agent = get_agent()
+        orchestrator = get_multi_agent_orchestrator()
 
         async def event_generator():
             final_answer = ""
             final_sources = []
-            is_refined = False
+            active_agent = "supervisor"
             had_error = False
 
             async with query_concurrency_gate:
@@ -102,7 +139,11 @@ async def query_rag_stream(
 
                 def worker():
                     try:
-                        for ev in current_agent.stream_events(request.question, thread_id=thread_id):
+                        for ev in orchestrator.stream_events(
+                            request.question,
+                            thread_id=thread_id,
+                            forced_agent=forced_agent,
+                        ):
                             q.put(ev)
                     except Exception as err:
                         logger.error(f"Error in stream worker: {err}")
@@ -125,7 +166,7 @@ async def query_rag_stream(
                             if item.get("type") == "done":
                                 final_answer = item.get("answer", "")
                                 final_sources = item.get("sources", [])
-                                is_refined = item.get("is_refined", False)
+                                active_agent = item.get("active_agent", "supervisor")
                             elif item.get("type") == "error":
                                 had_error = True
                         yield json.dumps(item, ensure_ascii=False) + "\n"
@@ -139,7 +180,7 @@ async def query_rag_stream(
                 username=current_user.username,
                 role=current_user.role,
                 action="query_stream",
-                detail=request.question,
+                detail=f"[{active_agent}] {request.question}",
                 sources=source_names,
                 answer_preview=final_answer,
                 ip_address=ip_addr,
