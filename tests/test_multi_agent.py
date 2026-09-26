@@ -94,10 +94,10 @@ class TestSupervisorAndOrchestrator(unittest.TestCase):
 
     def test_supervisor_direct_greeting(self):
         supervisor = SupervisorAgent(chat_model=MagicMock(), registry=self.registry)
-        result = supervisor.route({"question": "Merhaba"})
+        result = supervisor.route({"question": "Hello"})
 
         self.assertEqual(result["next_agent"], "finish")
-        self.assertIn("Merhaba!", result["final_answer"])
+        self.assertIn("Hello!", result["final_answer"])
         self.assertEqual(len(result["agent_trace"]), 1)
         self.assertEqual(result["agent_trace"][0]["action"], "direct_greeting")
 

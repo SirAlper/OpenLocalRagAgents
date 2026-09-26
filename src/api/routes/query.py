@@ -26,8 +26,8 @@ async def list_available_agents(
     agents = [
         AgentInfo(
             name="auto",
-            display_name="👑 Otomatik (Supervisor Orchestrator)",
-            description="Soruyu otomatik analiz edip en uygun uzman ajana veya doğrudan genel yanıta yönlendirir.",
+            display_name="👑 Auto (Supervisor Orchestrator)",
+            description="Automatically analyzes question intent and delegates to the best specialist sub-agent or responds directly.",
             version="2.0.0",
         )
     ]

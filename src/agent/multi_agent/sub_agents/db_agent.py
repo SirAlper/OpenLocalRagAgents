@@ -13,24 +13,24 @@ from src.core.logger import get_logger
 
 logger = get_logger("MultiAgent.DbAgent")
 
-SQL_GENERATOR_SYSTEM_PROMPT = """Sen uzman bir SQL analisti ve veritabanı uzmanısın.
-Görevin, kullanıcının sorusunu yanıtlamak için ilişkisel veritabanında çalışacak güvenli, salt-okunur (read-only) tek bir SQL sorgusu üretmektir.
+SQL_GENERATOR_SYSTEM_PROMPT = """You are an expert SQL analyst and database specialist.
+Your task is to generate a single safe, read-only SQL query to run against a relational database to answer the user's question.
 
-Kullanılabilir Veritabanı Şeması:
+Available Database Schema:
 {schema_summary}
 
-GÜVENLİK VE ÇALIŞMA KURALLARI:
-1. YALNIZCA 'SELECT' veya 'WITH ... SELECT' sorgusu üret.
-2. Kesinlikle INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE veya DDL/DML komutları KULLANMA.
-3. Yalnızca şemada listelenen tablolardan sorgu yap.
-4. Yanıtında kod blokları (```sql ... ```) veya ek açıklama yazma. SADECE çalıştırılabilir saf SQL sorgusunu yaz.
-5. Sonuç satır sayısını sınırlandırmak için gerekirse LIMIT kullan.
+SECURITY AND EXECUTION RULES:
+1. ONLY generate 'SELECT' or 'WITH ... SELECT' queries.
+2. NEVER use INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, or any DDL/DML statements.
+3. Only query tables listed in the schema above.
+4. Do NOT wrap output in markdown code blocks (```sql ... ```) or add explanations. Output ONLY the raw executable SQL query.
+5. Use LIMIT where appropriate to avoid unbounded result sets.
 """
 
-SQL_EXPLAINER_SYSTEM_PROMPT = """Sen profesyonel bir iş zekası ve veri analisti asistanısın.
-Kullanıcının sorusu ve veritabanından dönen SQL sorgu sonuçları aşağıda verilmiştir.
-Sonuçları kullanıcıya açık, anlaşılır, profesyonel ve gerekirse Markdown tablosu veya maddeleme kullanarak özetle.
-Eğer sonuç kümesi boşsa, veritabanında ilgili kaydın bulunamadığını nazikçe belirt.
+SQL_EXPLAINER_SYSTEM_PROMPT = """You are a professional business intelligence and data analyst assistant.
+The user's question and the SQL query results returned from the database are provided below.
+Explain and summarize the results for the user clearly, professionally, and accurately, utilizing Markdown tables or bullet points when appropriate.
+If the result set is empty, politely indicate that no matching records were found in the database.
 """
 
 
@@ -39,10 +39,10 @@ class DatabaseAgent(BaseSubAgent):
     """Specialist sub-agent for querying relational databases with strict AST read-only guards."""
 
     name: str = "db_agent"
-    display_name: str = "SQL & Veritabanı Ajanı"
+    display_name: str = "SQL & Database Analyst"
     description: str = (
-        "İlişkisel veritabanı tablolarındaki (ürünler, stoklar, satışlar, siparişler, destek talepleri vb.) "
-        "yapılandırılmış sayısal ve operasyonel verileri güvenli SQL ile sorgulamak ve raporlamak için kullanılır."
+        "Used for querying structured relational database tables (products, inventory, sales, "
+        "orders, tickets, etc.) using secure read-only SQL and reporting structured data insights."
     )
 
     def __init__(self, chat_model=None, db_connector: Optional[DatabaseConnector] = None):
@@ -63,7 +63,7 @@ class DatabaseAgent(BaseSubAgent):
 
         if not connector.is_connected:
             duration_ms = int((time.time() - start_time) * 1000)
-            msg = "Veritabanı bağlantısı şu anda aktif değil veya yapılandırılmamış."
+            msg = "Database connection is currently not active or not configured."
             trace_entry = {
                 "agent": self.name,
                 "display_name": self.display_name,
@@ -102,7 +102,7 @@ class DatabaseAgent(BaseSubAgent):
             logger.error(f"[{self.name}] Error during SQL generation: {e}")
             duration_ms = int((time.time() - start_time) * 1000)
             return {
-                "final_answer": f"Veritabanı sorgusu oluşturulurken bir hata oluştu: {e}",
+                "final_answer": f"An error occurred while generating the database query: {e}",
                 "sources": [],
                 "agent_trace": list(state.get("agent_trace", [])) + [{
                     "agent": self.name,
@@ -118,9 +118,9 @@ class DatabaseAgent(BaseSubAgent):
 
         if query_result.get("status") == "error":
             duration_ms = int((time.time() - start_time) * 1000)
-            err_msg = query_result.get("error", "Bilinmeyen veritabanı hatası")
+            err_msg = query_result.get("error", "Unknown database error")
             return {
-                "final_answer": f"Veritabanı sorgusu güvenlik veya sözdizimi nedeniyle çalıştırılamadı:\n`{err_msg}`",
+                "final_answer": f"Database query could not be executed due to security or syntax constraints:\n`{err_msg}`",
                 "sources": [],
                 "agent_trace": list(state.get("agent_trace", [])) + [{
                     "agent": self.name,
@@ -139,11 +139,11 @@ class DatabaseAgent(BaseSubAgent):
 
         # 4. Synthesize tabular result into user-friendly explanation
         explain_prompt = (
-            f"Kullanıcı Sorusu: {question}\n\n"
-            f"Çalıştırılan SQL: {sql_cleaned}\n"
-            f"Dönen Kolonlar: {', '.join(columns)}\n"
-            f"Dönen Satır Sayısı: {count}\n"
-            f"Veri (JSON):\n{json.dumps(rows[:30], ensure_ascii=False, indent=2)}"
+            f"User Question: {question}\n\n"
+            f"Executed SQL: {sql_cleaned}\n"
+            f"Returned Columns: {', '.join(columns)}\n"
+            f"Row Count: {count}\n"
+            f"Data (JSON):\n{json.dumps(rows[:30], ensure_ascii=False, indent=2)}"
         )
 
         try:
@@ -154,7 +154,7 @@ class DatabaseAgent(BaseSubAgent):
             answer = summary_response.content.strip()
         except Exception as e:
             logger.error(f"[{self.name}] Error synthesizing SQL results: {e}")
-            answer = f"Sorgu başarıyla çalıştırıldı ({count} kayıt bulundu):\n\n```json\n{json.dumps(rows[:10], ensure_ascii=False, indent=2)}\n```"
+            answer = f"Query executed successfully ({count} records found):\n\n```json\n{json.dumps(rows[:10], ensure_ascii=False, indent=2)}\n```"
 
         duration_ms = int((time.time() - start_time) * 1000)
         trace_entry = {

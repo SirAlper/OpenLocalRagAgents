@@ -1,50 +1,50 @@
-# 🤖 Özel Alt Ajan Geliştirme Yönergesi (Custom Agents Guide)
+# 🤖 Custom Sub-Agent Development Guide
 
-`OpenLocalRagAgents`, kurumsal ihtiyaçlarınıza göre yeni yapay zeka uzmanları (Sub-Agents) ekleyebileceğiniz **modüler, genişletilebilir ve tak-çalıştır (pluggable)** bir Multi-Agent mimarisine sahiptir.
+`OpenLocalEnterpriseRag` features a **modular, extensible, and pluggable Multi-Agent architecture** designed to incorporate specialized domain sub-agents according to enterprise requirements.
 
-Sistemde bir **Ana Ajan (Supervisor Orchestrator)** yer alır. Yazdığınız her yeni alt ajan sisteme kaydolduğunda, Ana Ajan onu **otomatik olarak tanır**, yeteneklerini öğrenir ve ilgili kullanıcı sorularını o ajana yönlendirir.
+The system is centered around an **Intelligent Supervisor Orchestrator**. Whenever a new sub-agent is registered, the Supervisor **automatically discovers it**, registers its specialization domain, and delegates relevant incoming user inquiries accordingly.
 
 ---
 
-## 🏗️ Mimari Bakış: Nasıl Çalışır?
+## 🏗️ Architectural Overview: How It Works
 
 ```text
                      ┌────────────────────────────────────────┐
-                     │    👑 Ana Ajan (Supervisor Router)     │
-                     │  - Kullanıcı niyetini analiz eder      │
-                     │  - Kayıtlı ajanların tanımını okur     │
+                     │    👑 Supervisor Orchestrator Router   │
+                     │  - Analyzes user intent & semantics    │
+                     │  - Reads dynamic registered agent meta │
                      └───────────────────┬────────────────────┘
                                          │
         ┌────────────────────────────────┼────────────────────────────────┐
         ▼                                ▼                                ▼
 ┌──────────────┐                 ┌──────────────┐                 ┌──────────────────────┐
-│  doc_agent   │                 │   db_agent   │                 │ ✨ SİZİN ÖZEL AJANINIZ │
-│ Belge Ajanı  │                 │   SQL Ajanı  │                 │  (@register_agent)   │
+│  doc_agent   │                 │   db_agent   │                 │ ✨ YOUR CUSTOM AGENT  │
+│ Document RAG │                 │ SQL Database │                 │  (@register_agent)   │
 └──────────────┘                 └──────────────┘                 └──────────────────────┘
 ```
 
-Her alt ajan, standart **LangGraph** düğüm (node) yapısına uyan `BaseSubAgent` sınıfından miras alır ve `execute(state)` metodunu uygular.
+Every sub-agent inherits from the standardized `BaseSubAgent` class conforming to LangGraph node conventions and implements an `execute(state)` lifecycle method.
 
 ---
 
-## 🚀 5 Dakikada Yeni Bir Ajan Oluşturma
+## 🚀 Creating a New Agent in 3 Simple Steps
 
-Yeni bir uzman ajan eklemek için izlemeniz gereken **3 basit adım**:
+Adding a new specialist sub-agent requires only **3 steps**:
 
-### Adım 1: `BaseSubAgent` Sınıfından Miras Alın
-Ajanınızın benzersiz adını (`name`), kullanıcı arayüzünde görünecek adını (`display_name`) ve Ana Ajan'ın yönlendirme yapabilmesi için **uzmanlık alanını (`description`)** tanımlayın.
+### Step 1: Inherit from `BaseSubAgent`
+Define your agent's unique identifier (`name`), UI label (`display_name`), and the **specialization description (`description`)** that the Supervisor uses for intent routing.
 
-### Adım 2: `@register_agent` Dekoratörünü Ekleyin
-Sınıfınızın başına `@register_agent` ekleyerek tek satırda merkezi kayıt defterine (`agent_registry`) bağlayın.
+### Step 2: Decorate with `@register_agent`
+Add `@register_agent` to your class definition to automatically register it into the central `agent_registry`.
 
-### Adım 3: `execute(state)` Metodunu Yazın
-Görevi yerine getiren iş mantığını kodlayın ve kullanıcıya dönecek cevabı `{"final_answer": "...", "sources": [...]}` sözlüğü olarak döndürün.
+### Step 3: Implement the `execute(state)` Method
+Write your domain business logic, query execution, or calculations, and return a standardized dictionary containing `{"final_answer": "...", "sources": [...], "agent_trace": [...]}`.
 
 ---
 
-## 📝 Örnek Senaryo: Döviz ve Finans Hesaplama Ajanı (`FinanceCalculatorAgent`)
+## 📝 Reference Example: Financial & Currency Calculator (`FinanceCalculatorAgent`)
 
-Aşağıda, şirket içi finansal hesaplamalar ve döviz çevirileri yapan eksiksiz bir özel ajan örneği yer almaktadır:
+Below is a complete, production-ready custom agent for financial calculations and currency conversions:
 
 ```python
 import time
@@ -61,48 +61,47 @@ logger = get_logger("MultiAgent.FinanceAgent")
 
 @register_agent
 class FinanceCalculatorAgent(BaseSubAgent):
-    """Finansal hesaplamalar, kur çevirileri ve bütçe analizleri yapan uzman ajan."""
+    """Specialist sub-agent for financial calculations, currency conversions, and budget metrics."""
 
-    # 1. Ajanın benzersiz kimliği (Supervisor routing için kullanılır)
+    # 1. Unique agent identifier (used for routing)
     name: str = "finance_agent"
 
-    # 2. UI ve loglarda görünen etiket
-    display_name: str = "Finans & Kur Analisti"
+    # 2. UI and logging display label
+    display_name: str = "Finance & Currency Analyst"
 
-    # 3. CRITICAL: Supervisor bu tanımı okuyarak soruyu bu ajana yönlendirir!
+    # 3. CRITICAL: The Supervisor inspects this description to route user questions!
     description: str = (
-        "Döviz kurları, para birimi çevirileri, KDV/vergi hesaplamaları, bütçe oranları, "
-        "kredi/faiz maliyetleri ve finansal matematik hesaplamaları için kullanılır."
+        "Used for foreign currency exchange rates, currency conversions (USD, EUR, GBP), "
+        "VAT/tax calculations, budget ratios, interest calculations, and financial mathematics."
     )
 
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Ajanın çalışma mantığı."""
+        """Execute domain calculation and grounded response generation."""
         start_time = time.time()
         question = state.get("question", "").strip()
 
-        logger.info(f"[{self.name}] Finansal talep işleniyor: '{question}'")
+        logger.info(f"[{self.name}] Processing financial request: '{question}'")
 
-        # Özel Ajan Promptu
         system_prompt = (
-            "Sen uzman bir kurumsal finans analistisin. "
-            "Kullanıcının finansal hesaplama veya kur çevirisi talebini adım adım ve "
-            "net bir şekilde hesaplayarak açıkla. Sonuçları anlaşılır bir formatta sun."
+            "You are an enterprise financial analyst assistant. "
+            "Explain and calculate the user's financial or currency request step-by-step. "
+            "Present results clearly with professional formatting."
         )
 
         try:
-            # self.chat_model otomatik olarak paylaşımlı LLM motorunu kullanır
+            # self.chat_model automatically reuses the shared local LLM backend
             response = self.chat_model.invoke([
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=question),
             ])
             answer = response.content.strip()
         except Exception as e:
-            logger.error(f"[{self.name}] Hata oluştu: {e}")
-            answer = f"Finansal hesaplama yapılırken bir hata oluştu: {e}"
+            logger.error(f"[{self.name}] Calculation error: {e}")
+            answer = f"An error occurred while processing the financial request: {e}"
 
         duration_ms = int((time.time() - start_time) * 1000)
 
-        # Şeffaf denetim izi (Trace) kaydı
+        # Transparent execution trace entry
         trace_entry = {
             "agent": self.name,
             "display_name": self.display_name,
@@ -112,13 +111,13 @@ class FinanceCalculatorAgent(BaseSubAgent):
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-        # Standart dönüş formatı
+        # Standardized return contract
         return {
             "final_answer": answer,
             "sources": [{
                 "source": "FinanceEngine: Calculator",
                 "chunk_index": 0,
-                "content": "Kurumsal finans hesaplama motoru çıktısı.",
+                "content": "Enterprise financial calculation engine output.",
             }],
             "agent_trace": list(state.get("agent_trace", [])) + [trace_entry],
         }
@@ -126,60 +125,60 @@ class FinanceCalculatorAgent(BaseSubAgent):
 
 ---
 
-## ⚙️ Ajanın Sisteme Dahil Edilmesi (Registration Options)
+## ⚙️ Registration Options
 
-Yeni ajanınızı sisteme tanıtmak için iki yöntemden birini kullanabilirsiniz:
+You can register sub-agents in two ways:
 
-### Yöntem A: Dekoratör ile Otomatik Kayıt (Tavsiye Edilen)
-Ajan sınıfınızın başına `@register_agent` ekleyin ve dosyanızı `src/agent/multi_agent/sub_agents/` klasörü altına kaydedin:
+### Method A: Automatic Decorator Registration (Recommended)
+Add `@register_agent` above your class and save the file in `src/agent/multi_agent/sub_agents/`:
 ```python
 @register_agent
 class MyCustomAgent(BaseSubAgent):
     ...
 ```
 
-### Yöntem B: Dinamik Programatik Kayıt
-Çalışma anında (runtime) bir ajanı sisteme eklemek veya çıkarmak isterseniz:
+### Method B: Programmatic Runtime Registration
+To dynamically register or unregister an agent at runtime:
 ```python
 from src.agent.multi_agent.registry import agent_registry
 
-# Ajanı kaydet
+# Register agent instance
 agent = MyCustomAgent()
 agent_registry.register(agent)
 
-# Kayıtlı ajanları listele
+# List registered agents
 print(agent_registry.list_agent_names())
-# Çıktı: ['doc_agent', 'db_agent', 'compliance_agent', 'my_custom_agent']
+# Output: ['doc_agent', 'db_agent', 'compliance_agent', 'my_custom_agent']
 
-# Ajanı sistemden çıkar
+# Unregister if needed
 agent_registry.unregister("my_custom_agent")
 ```
 
 ---
 
-## 💡 En İyi Uygulamalar (Best Practices)
+## 💡 Best Practices
 
-1. **`description` Alanı Çok Önemlidir:**
-   * Supervisor, kullanıcının sorusunu hangi ajana yönlendireceğine **tamamen bu açıklamaya bakarak** karar verir.
-   * Açıklamanızda ajanınızın ilgilendiği anahtar kelimeleri ve görev türlerini net bir şekilde belirtin.
-   * *Kötü Örnek:* `"Finans işlerini yapar."`
-   * *İyi Örnek:* `"Döviz kurları, para birimi çevirileri, KDV/vergi hesaplamaları, bütçe oranları ve maliyet analizleri için kullanılır."`
+1. **`description` Field is Paramount:**
+   * The Supervisor routes queries **strictly based on this semantic description**.
+   * Include clear keywords and task types your agent handles.
+   * *Avoid:* `"Handles financial tasks."`
+   * *Recommended:* `"Used for foreign currency exchange rates, currency conversions (USD, EUR, GBP), VAT/tax calculations, budget ratios, and cost analyses."`
 
-2. **Bellek Güvenliği (Lazy Loading):**
-   * Ajanınız ağır bir model veya kütüphane gerektiriyorsa, bunu dosya başında veya `__init__` anında değil, `execute()` metodunda veya `@property` arkasında yükleyin.
-   * `self.chat_model` özelliği varsayılan olarak paylaşımlı tekil LLM modelini kullanır, böylece VRAM tüketimi artmaz.
+2. **Memory Safety & Lazy Loading:**
+   * If your agent requires heavy dependencies or external drivers, load them inside `execute()` or behind a cached `@property` rather than during module import.
+   * `self.chat_model` automatically leverages the shared singleton LLM, preventing duplicate VRAM allocations.
 
-3. **Şeffaf İzleme (`agent_trace`):**
-   * `execute()` fonksiyonunuzun döndürdüğü sözlüğe mutlaka `agent_trace` alanını ekleyin. Bu sayede kullanıcı arayüzü ve API yanıtı hangi ajanın ne kadar sürede çalıştığını şeffafça gösterir.
+3. **Transparent Auditing (`agent_trace`):**
+   * Always append an `agent_trace` entry in the dictionary returned by `execute()`. This feeds the Streamlit UI trace panel and the audit database.
 
-4. **Hata Yakalama (Graceful Degradation):**
-   * Ağ veya hesaplama hatalarını `try-except` bloğunda yakalayın ve kullanıcıya anlaşılır bir hata mesajı ile `status: "error"` trace kaydı üretin. Sistemin kilitlenmesine izin vermeyin.
+4. **Graceful Degradation:**
+   * Wrap external API or database calls in `try-except` blocks. If an error occurs, return a helpful error explanation with `status: "error"` in the trace entry without crashing the pipeline.
 
 ---
 
-## 🧪 Özel Ajanınızı Test Etme
+## 🧪 Testing Your Custom Agent
 
-Ajanınızın beklendiği gibi çalıştığını doğrulamak için `unittest` veya `pytest` yazabilirsiniz:
+You can test custom sub-agents using standard `unittest` or `pytest`:
 
 ```python
 import unittest
@@ -193,7 +192,7 @@ class TestFinanceAgent(unittest.TestCase):
         mock_llm.invoke.return_value = MagicMock(content="100 USD = 3450 TRY")
 
         agent = FinanceCalculatorAgent(chat_model=mock_llm)
-        result = agent.execute({"question": "100 dolar kaç TL yapar?"})
+        result = agent.execute({"question": "Convert 100 USD to local currency"})
 
         self.assertIn("3450 TRY", result["final_answer"])
         self.assertEqual(len(result["agent_trace"]), 1)
