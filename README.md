@@ -105,7 +105,7 @@ docker compose --profile ollama up -d
 See the full [Docker Deployment Guide](docs/docker_deployment.md) for Container Toolkit setup.
 
 ### 5. Run Automated Tests
-Verify all 52 unit, integration, and security tests across agent workflows, RBAC, database, loader, and memory guards:
+Verify all 69 unit, integration, and security tests across agent workflows, RBAC, database, loader, and memory guards:
 ```bash
 python -m unittest discover tests -v
 # or using pytest:
@@ -132,6 +132,7 @@ OpenLocalRagAgents/
 │   ├── agent/             # Single-agent & Multi-Agent workflows, LLM loader, memory, prompts
 │   │   └── multi_agent/   # Supervisor orchestrator, agent registry, and specialist sub-agents
 │   ├── connectors/        # SQLAlchemy universal database connector and table vectorizer
+│   ├── services/          # Decoupled business logic (DocumentService, DatabaseService)
 │   ├── api/               # Modular FastAPI REST API gateway (routes/, schemas, state)
 │   └── main.py            # Backward-compatible launch entrypoint (uvicorn src.main:app)
 ├── docs/                  # Comprehensive Technical Guides (docs/)

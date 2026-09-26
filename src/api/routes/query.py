@@ -1,13 +1,17 @@
+"""AI Query API Routes.
+
+Exposes endpoints for multi-agent query delegation, real-time stage event streaming,
+specialist catalog discovery, and user feedback submission.
+"""
 import time
 import json
 import asyncio
-import queue
 import threading
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from src.api.schemas import QueryRequest, AgentsListResponse, AgentInfo
-from src.api.state import get_agent, get_multi_agent_orchestrator, query_concurrency_gate
+from src.api.state import get_multi_agent_orchestrator, query_concurrency_gate
 from src.agent.multi_agent.registry import agent_registry
 from src.auth.dependencies import require_role
 from src.auth.models import User
@@ -20,7 +24,7 @@ router = APIRouter(tags=["AI Query"])
 
 @router.get("/api/v1/agents", summary="List Available Multi-Agent Specialists", response_model=AgentsListResponse)
 async def list_available_agents(
-    current_user: User = Depends(require_role("admin", "editor", "viewer")),
+    _: User = Depends(require_role("admin", "editor", "viewer")),
 ):
     """Return all registered specialist sub-agents available for query delegation."""
     agents = [
@@ -72,7 +76,7 @@ async def query_rag(
         source_names = [s.get("source") for s in result.get("sources", []) if s.get("source")]
         active_agent = result.get("active_agent", "supervisor")
 
-        audit_logger.log(
+        await audit_logger.alog(
             username=current_user.username,
             role=current_user.role,
             action="query",
@@ -95,7 +99,7 @@ async def query_rag(
         }
     except Exception as e:
         duration_ms = int((time.time() - start_time) * 1000)
-        audit_logger.log(
+        await audit_logger.alog(
             username=current_user.username,
             role=current_user.role,
             action="query",
@@ -134,7 +138,8 @@ async def query_rag_stream(
             had_error = False
 
             async with query_concurrency_gate:
-                q: queue.Queue = queue.Queue()
+                loop = asyncio.get_running_loop()
+                async_q = asyncio.Queue()
                 sentinel = object()
 
                 def worker():
@@ -144,39 +149,33 @@ async def query_rag_stream(
                             thread_id=thread_id,
                             forced_agent=forced_agent,
                         ):
-                            q.put(ev)
+                            loop.call_soon_threadsafe(async_q.put_nowait, ev)
                     except Exception as err:
                         logger.error(f"Error in stream worker: {err}")
-                        q.put({"type": "error", "message": str(err)})
+                        loop.call_soon_threadsafe(async_q.put_nowait, {"type": "error", "message": str(err)})
                     finally:
-                        q.put(sentinel)
+                        loop.call_soon_threadsafe(async_q.put_nowait, sentinel)
 
-                thread = threading.Thread(target=worker)
-                thread.start()
+                worker_thread = threading.Thread(target=worker, daemon=True)
+                worker_thread.start()
 
                 while True:
-                    while q.empty() and thread.is_alive():
-                        await asyncio.sleep(0.05)
-                    if not q.empty():
-                        item = q.get()
-                        if item is sentinel:
-                            break
-                        # Capture final state for audit logging
-                        if isinstance(item, dict):
-                            if item.get("type") == "done":
-                                final_answer = item.get("answer", "")
-                                final_sources = item.get("sources", [])
-                                active_agent = item.get("active_agent", "supervisor")
-                            elif item.get("type") == "error":
-                                had_error = True
-                        yield json.dumps(item, ensure_ascii=False) + "\n"
-                    elif not thread.is_alive():
+                    item = await async_q.get()
+                    if item is sentinel:
                         break
+                    if isinstance(item, dict):
+                        if item.get("type") == "done":
+                            final_answer = item.get("answer", "")
+                            final_sources = item.get("sources", [])
+                            active_agent = item.get("active_agent", "supervisor")
+                        elif item.get("type") == "error":
+                            had_error = True
+                    yield json.dumps(item, ensure_ascii=False) + "\n"
 
             # Audit logging after stream completes
             duration_ms = int((time.time() - start_time) * 1000)
             source_names = [s.get("source") for s in final_sources if s.get("source")]
-            audit_logger.log(
+            await audit_logger.alog(
                 username=current_user.username,
                 role=current_user.role,
                 action="query_stream",
@@ -191,7 +190,7 @@ async def query_rag_stream(
         return StreamingResponse(event_generator(), media_type="application/x-ndjson")
     except Exception as e:
         duration_ms = int((time.time() - start_time) * 1000)
-        audit_logger.log(
+        await audit_logger.alog(
             username=current_user.username,
             role=current_user.role,
             action="query_stream",
@@ -209,17 +208,17 @@ async def submit_feedback(
     request: Request,
     current_user: User = Depends(require_role("admin", "editor", "viewer")),
 ):
-    """Record thumbs up/down feedback for answer quality tracking."""
+    """Record user feedback for answer quality tracking."""
     body = await request.json()
     question = body.get("question", "")
-    feedback = body.get("feedback", "")  # "positive" or "negative"
+    feedback = body.get("feedback", "")
     comment = body.get("comment", "")
     ip_addr = request.client.host if request.client else None
 
     if feedback not in ("positive", "negative"):
         raise HTTPException(status_code=400, detail="Feedback must be 'positive' or 'negative'.")
 
-    audit_logger.log(
+    await audit_logger.alog(
         username=current_user.username,
         role=current_user.role,
         action="feedback",

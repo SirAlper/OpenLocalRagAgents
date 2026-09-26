@@ -135,7 +135,7 @@ class MultiAgentOrchestrator:
         """Stream real-time multi-agent execution events with intermediate status and final response."""
         yield {
             "type": "status",
-            "message": "👑 Supervisor: Soru analiz ediliyor ve en uygun uzman ajan belirleniyor...",
+            "message": "👑 Supervisor: Analyzing query and routing to the optimal specialist agent...",
             "node": "supervisor",
         }
 
@@ -159,7 +159,7 @@ class MultiAgentOrchestrator:
                 "type": "agent_selected",
                 "agent": "supervisor",
                 "display_name": "Supervisor Orchestrator",
-                "reason": "Genel yanıt / selamlama doğrudan yanıtlandı.",
+                "reason": "General query or greeting handled directly by Supervisor.",
             }
             yield {
                 "type": "done",
@@ -178,12 +178,12 @@ class MultiAgentOrchestrator:
             "type": "agent_selected",
             "agent": target_agent,
             "display_name": display_name,
-            "reason": f"Görev '{display_name}' uzmanına devredildi.",
+            "reason": f"Task delegated to specialist: '{display_name}'.",
         }
 
         yield {
             "type": "status",
-            "message": f"🤖 {display_name}: Uzmanlık alanı kapsamında çalışıyor...",
+            "message": f"🤖 {display_name}: Executing specialized task...",
             "node": target_agent,
         }
 

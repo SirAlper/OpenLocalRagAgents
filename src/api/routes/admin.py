@@ -1,9 +1,17 @@
+"""Admin and Audit Trail API Routes.
+
+Exposes endpoints for compliance audit log querying, audit statistics,
+session cleanup, and vector database backup/restore operations.
+"""
+import os
+import asyncio
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.auth.dependencies import require_role
 from src.auth.models import User
 from src.core.audit import audit_logger
+from src.core.config import VECTOR_DB_PATH
 from src.api.state import (
     cleanup_expired_sessions,
     backup_vector_db,
@@ -17,7 +25,7 @@ router = APIRouter(prefix="/api/v1/admin", tags=["Admin & Audit Trail"])
 
 
 @router.get("/audit-logs", summary="List and Filter Compliance Audit Logs")
-def get_audit_logs(
+async def get_audit_logs(
     username: Optional[str] = Query(None, description="Filter by user"),
     action: Optional[str] = Query(None, description="Filter by action (query, upload, delete, login, etc.)"),
     status: Optional[str] = Query(None, description="Filter by status (success, error, denied)"),
@@ -27,11 +35,9 @@ def get_audit_logs(
     offset: int = Query(0, ge=0),
     _: User = Depends(require_role("admin")),
 ):
-    """
-    Retrieve tamper-evident audit logs with multi-parameter filtering (Admin only).
-    """
-    total = audit_logger.count_logs(username=username, action=action, status=status)
-    logs = audit_logger.query_logs(
+    """Retrieve tamper-evident audit logs with multi-parameter filtering (Admin only)."""
+    total = await audit_logger.acount_logs(username=username, action=action, status=status)
+    logs = await audit_logger.aquery_logs(
         username=username,
         action=action,
         status=status,
@@ -51,18 +57,16 @@ def get_audit_logs(
 
 
 @router.get("/audit-stats", summary="Audit Trail Metrics and Compliance Summary")
-def get_audit_stats(_: User = Depends(require_role("admin"))):
-    """
-    Summary of enterprise actions, queries processed, and compliance indicators (Admin only).
-    """
-    total_logs = audit_logger.count_logs()
-    total_queries = audit_logger.count_logs(action="query")
-    total_stream_queries = audit_logger.count_logs(action="query_stream")
-    total_uploads = audit_logger.count_logs(action="upload")
-    total_deletions = audit_logger.count_logs(action="delete")
-    total_logins = audit_logger.count_logs(action="login")
-    total_errors = audit_logger.count_logs(status="error")
-    total_feedback = audit_logger.count_logs(action="feedback")
+async def get_audit_stats(_: User = Depends(require_role("admin"))):
+    """Summary of enterprise actions, queries processed, and compliance indicators (Admin only)."""
+    total_logs = await audit_logger.acount_logs()
+    total_queries = await audit_logger.acount_logs(action="query")
+    total_stream_queries = await audit_logger.acount_logs(action="query_stream")
+    total_uploads = await audit_logger.acount_logs(action="upload")
+    total_deletions = await audit_logger.acount_logs(action="delete")
+    total_logins = await audit_logger.acount_logs(action="login")
+    total_errors = await audit_logger.acount_logs(status="error")
+    total_feedback = await audit_logger.acount_logs(action="feedback")
 
     return {
         "status": "success",
@@ -80,16 +84,14 @@ def get_audit_stats(_: User = Depends(require_role("admin"))):
 # ──────────────────────────── SESSION MANAGEMENT ────────────────────────────
 
 @router.post("/cleanup-sessions", summary="Cleanup Expired Conversation Sessions")
-def cleanup_sessions(
+async def cleanup_sessions(
     max_age_days: int = Query(30, ge=1, le=365, description="Maximum session age in days"),
     current_admin: User = Depends(require_role("admin")),
 ):
-    """
-    Remove conversation sessions older than the specified number of days (Admin only).
-    """
-    deleted = cleanup_expired_sessions(max_age_days=max_age_days)
+    """Remove conversation sessions older than the specified number of days (Admin only)."""
+    deleted = await asyncio.to_thread(cleanup_expired_sessions, max_age_days=max_age_days)
 
-    audit_logger.log(
+    await audit_logger.alog(
         username=current_admin.username,
         role=current_admin.role,
         action="session_cleanup",
@@ -107,13 +109,11 @@ def cleanup_sessions(
 # ──────────────────────────── VECTOR DB BACKUP/RESTORE ────────────────────────────
 
 @router.post("/backup", summary="Create Vector Database Backup")
-def create_backup(current_admin: User = Depends(require_role("admin"))):
-    """
-    Create a timestamped backup of the ChromaDB vector database (Admin only).
-    """
+async def create_backup(current_admin: User = Depends(require_role("admin"))):
+    """Create a timestamped backup of the ChromaDB vector database (Admin only)."""
     try:
-        backup_path = backup_vector_db()
-        audit_logger.log(
+        backup_path = await asyncio.to_thread(backup_vector_db)
+        await audit_logger.alog(
             username=current_admin.username,
             role=current_admin.role,
             action="backup_create",
@@ -132,11 +132,9 @@ def create_backup(current_admin: User = Depends(require_role("admin"))):
 
 
 @router.get("/backups", summary="List Available Backups")
-def get_backups(_: User = Depends(require_role("admin"))):
-    """
-    List all available vector database backups (Admin only).
-    """
-    backups = list_backups()
+async def get_backups(_: User = Depends(require_role("admin"))):
+    """List all available vector database backups (Admin only)."""
+    backups = await asyncio.to_thread(list_backups)
     return {
         "status": "success",
         "count": len(backups),
@@ -145,7 +143,7 @@ def get_backups(_: User = Depends(require_role("admin"))):
 
 
 @router.post("/restore", summary="Restore Vector Database from Backup")
-def restore_backup(
+async def restore_backup(
     backup_name: str = Query(..., description="Name of the backup directory to restore"),
     current_admin: User = Depends(require_role("admin")),
 ):
@@ -153,9 +151,6 @@ def restore_backup(
     Restore ChromaDB vector database from a named backup (Admin only).
     WARNING: This replaces the current vector database entirely.
     """
-    import os
-    from src.core.config import VECTOR_DB_PATH
-
     backup_dir = os.path.join(os.path.dirname(VECTOR_DB_PATH), "backups")
     backup_path = os.path.join(backup_dir, backup_name)
 
@@ -165,11 +160,11 @@ def restore_backup(
     if not real_backup.startswith(real_backup_dir):
         raise HTTPException(status_code=400, detail="Invalid backup name.")
 
-    success = restore_vector_db(backup_path)
+    success = await asyncio.to_thread(restore_vector_db, backup_path)
     if not success:
         raise HTTPException(status_code=400, detail=f"Restore failed. Backup '{backup_name}' may not exist.")
 
-    audit_logger.log(
+    await audit_logger.alog(
         username=current_admin.username,
         role=current_admin.role,
         action="backup_restore",

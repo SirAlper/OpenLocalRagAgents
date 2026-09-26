@@ -31,6 +31,15 @@ class DatabaseConnector:
         if self.database_url:
             self._init_engine()
 
+    @property
+    def dialect(self) -> str:
+        """Return the database dialect name (e.g. 'sqlite', 'postgresql', 'mysql')."""
+        if self.engine is not None:
+            return self.engine.dialect.name
+        if self.database_url:
+            return self.database_url.split("://", 1)[0].split("+", 1)[0].lower()
+        return "unknown"
+
     def _init_engine(self):
         """Initialize the SQLAlchemy engine."""
         try:
